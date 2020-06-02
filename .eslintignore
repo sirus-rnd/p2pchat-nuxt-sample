@@ -1,0 +1,19 @@
+# Dependency directories
+node_modules/**/*
+jspm_packages/
+
+# cache
+cache/**/*
+
+# build
+dist/**/*
+.nuxt
+protos/**/*
+static/**/*.js
+
+# tests
+test/build
+test/snapshots
+
+# protobufs
+protos
