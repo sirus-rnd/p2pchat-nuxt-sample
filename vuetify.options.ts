@@ -11,7 +11,7 @@ export default {
       dark: {
         primary: colors.teal.accent4,
         accent: colors.grey.base,
-        secondary: colors.grey.darken4,
+        secondary: colors.grey.darken1,
         info: colors.teal.accent3,
         warning: colors.amber.darken2,
         error: colors.red.accent2,

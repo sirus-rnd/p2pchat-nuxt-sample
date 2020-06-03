@@ -1,8 +1,6 @@
 import { Component, Vue } from 'vue-property-decorator';
 
-@Component({
-  layout: 'app'
-})
+@Component
 /**
  * This page use as default routes
  *
@@ -11,5 +9,7 @@ import { Component, Vue } from 'vue-property-decorator';
  * @extends {Vue}
  */
 export default class IndexPage extends Vue {
-  mounted() {}
+  mounted() {
+    this.$router.push({ path: '/login' });
+  }
 }

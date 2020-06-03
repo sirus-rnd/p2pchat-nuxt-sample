@@ -11,19 +11,28 @@
     "start": "nuxt-ts start",
     "lint": "eslint --ext .ts,.js,.vue .",
     "fix-lint": "eslint --fix .",
-    "test": "jest"
+    "test": "jest",
+    "proto": "protoc -I=./protos signalling.proto --js_out=import_style=commonjs:./protos   --grpc-web_out=import_style=typescript,mode=grpcwebtext:./protos",
+    "proto-win": "protoc --plugin=\"protoc-gen-ts=D:\\document\\sirus\\p2p-comm\\nuxt-peer\\node_modules\\.bin\\protoc-gen-ts.cmd\" --js_out=\"import_style=commonjs,binary:./protos\" --ts_out=\"service=grpc-web:./protos\" -I=./protos signalling.proto"
   },
   "dependencies": {
-    "nuxt": "^2.0.0",
+    "@improbable-eng/grpc-web": "^0.12.0",
     "@nuxt/typescript-runtime": "^0.4.0",
-    "@nuxtjs/pwa": "^3.0.0-0"
+    "@nuxtjs/pwa": "^3.0.0-0",
+    "bluebird": "^3.7.2",
+    "google-protobuf": "^3.12.2",
+    "grpc-web": "^1.1.0",
+    "luxon": "^1.24.1",
+    "nuxt": "^2.0.0"
   },
   "devDependencies": {
     "@nuxt/typescript-build": "^0.6.0",
     "@nuxtjs/eslint-config-typescript": "^1.0.0",
     "@nuxtjs/eslint-module": "^1.0.0",
     "@nuxtjs/vuetify": "^1.0.0",
+    "@types/faker": "^4.1.12",
     "@types/jest": "^25.2.3",
+    "@types/luxon": "^1.24.0",
     "@vue/test-utils": "^1.0.0-beta.27",
     "babel-eslint": "^10.0.1",
     "babel-jest": "^24.1.0",
@@ -31,9 +40,11 @@
     "eslint-config-prettier": "^6.10.0",
     "eslint-plugin-nuxt": ">=0.4.2",
     "eslint-plugin-prettier": "^3.1.2",
+    "faker": "^4.1.0",
     "jest": "^24.1.0",
     "prettier": "^1.19.1",
     "ts-jest": "^25.0.0",
+    "ts-protoc-gen": "^0.12.0",
     "vue-jest": "^4.0.0-0",
     "vue-property-decorator": "^8.4.2",
     "vuex-class": "^0.3.2"
