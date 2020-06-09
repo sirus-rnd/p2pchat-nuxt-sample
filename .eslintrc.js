@@ -16,6 +16,8 @@ module.exports = {
   // add your custom rules here
   rules: {
     "standard/computed-property-even-spacing": "off",
-    "camelcase": [2, {"properties": "never"}]
+    "camelcase": [2, {"properties": "never"}],
+    "no-useless-constructor": "off",
+    "lines-between-class-members": "off"
   }
 };
