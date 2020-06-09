@@ -72,6 +72,17 @@ export interface ConversationState {
   errorMessage?: string;
 }
 
+export interface PendingConversation {
+  id: string;
+  conversationId: string;
+  receiverId: string;
+}
+
+export interface PendingConversationPayload {
+  conversationId: string;
+  receiverId: string;
+}
+
 export interface IConversationStateManager {
   getPendingConversations(userID: string): Promise<ConversationState[]>;
   getConversations(
@@ -81,6 +92,7 @@ export interface IConversationStateManager {
   ): Promise<ConversationState[]>;
   getConversation(id: string): Promise<ConversationState>;
   sendMessage(payload: MessageSendPayload): Promise<ConversationState>;
+  addPendingConversation(payload: PendingConversationPayload): Promise<void>;
   failedToSend(payload: MessageFailedToSendPayload): Promise<ConversationState>;
   receiveMessage(payload: ReceiveMessagePayload): Promise<ConversationState>;
   readMessage(payload: MessageReadPayload): Promise<ConversationState>;
@@ -121,12 +133,20 @@ export class ConversationManager implements IConversationStateManager {
         'errorCode',
         'errorMessage'
       ]);
+
     builder
       .createTable('action')
       .addColumn('time', Type.DATE_TIME)
       .addColumn('type', Type.STRING)
       .addColumn('payload', Type.OBJECT)
       .addIndex('idxTime', ['time'], false, Order.DESC);
+
+    builder
+      .createTable('pending-conversation')
+      .addColumn('id', Type.STRING)
+      .addColumn('conversationId', Type.STRING)
+      .addColumn('receiverId', Type.STRING)
+      .addPrimaryKey(['id']);
 
     // connect to database
     return builder.connect();
@@ -138,9 +158,42 @@ export class ConversationManager implements IConversationStateManager {
     }
   }
 
-  getPendingConversations(userID: string): Promise<ConversationState[]> {
-    console.log(`get pending convo for user id ${userID}`);
-    return Promise.resolve([]);
+  async getPendingConversations(userID: string): Promise<ConversationState[]> {
+    const pendingTable = this.db.getSchema().table('pending-conversation');
+    const pendings = await this.db
+      .select()
+      .from(pendingTable)
+      .where(pendingTable.receiverId.eq(userID))
+      .exec();
+
+    const pendingIds = pendings.map(
+      (pending: PendingConversation) => pending.conversationId
+    );
+
+    // get all conversation
+    const convTable = this.db.getSchema().table('conversations');
+    const results = await this.db
+      .select()
+      .from(convTable)
+      .where(convTable.id.in(pendingIds))
+      .orderBy(convTable.sendAt, Order.DESC)
+      .exec();
+    return results as ConversationState[];
+  }
+
+  async addPendingConversation(payload: PendingConversationPayload) {
+    const pendingTable = this.db.getSchema().table('pending-conversation');
+    const row = pendingTable.createRow({
+      id: `${payload.conversationId}-${payload.receiverId}`,
+      receiverId: payload.receiverId,
+      conversationId: payload.conversationId
+    } as PendingConversation);
+    await this.db
+      .insertOrReplace()
+      .into(pendingTable)
+      .values([row])
+      .exec();
+    return null;
   }
 
   async getConversations(

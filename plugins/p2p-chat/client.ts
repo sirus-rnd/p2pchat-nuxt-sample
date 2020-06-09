@@ -375,12 +375,16 @@ export class ChatClient implements IChatClient {
     });
 
     await Promise.all(
-      participants.map((id) => {
+      participants.map(async (id) => {
         const chan = this.channels[id];
         if (!chan || !chan.connected) {
+          await this.conversationManager.addPendingConversation({
+            receiverId: id,
+            conversationId: convState.id
+          });
           return null;
         }
-        this.sendChannelMessage(id, {
+        return this.sendChannelMessage(id, {
           type: MessagingType.MessageNew,
           payload: {
             id: convState.id,
