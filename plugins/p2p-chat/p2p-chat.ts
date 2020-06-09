@@ -63,7 +63,6 @@ export interface IChatClient {
   typing(roomID: string): Promise<void>;
   onUserConnected: Observable<string>; // user id
   onUserDisconnected: Observable<string>; // user id
-  onMessageSent: Observable<Conversation>;
   onMessageReceived: Observable<Conversation>;
   onMessageRead: Observable<Conversation>;
   onReceiveMessage: Observable<Conversation>;
