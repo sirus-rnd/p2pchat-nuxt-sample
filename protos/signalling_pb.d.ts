@@ -603,8 +603,9 @@ export namespace UserInstanceEventPayload {
 }
 
 export enum ICECredentialType { 
-  PASSWORD = 0,
-  OAUTH = 1,
+  NONE = 0,
+  PASSWORD = 1,
+  OAUTH = 2,
 }
 export enum SDPTypes { 
   OFFER = 0,

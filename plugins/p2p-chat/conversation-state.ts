@@ -103,7 +103,11 @@ export interface IConversationStateManager {
 export class ConversationManager implements IConversationStateManager {
   private db: Database;
 
-  connect(): Promise<Database> {
+  async init() {
+    this.db = await this.connect();
+  }
+
+  private connect(): Promise<Database> {
     const builder = schema.create('chat', 1);
     builder
       .createTable('conversations')
@@ -125,7 +129,7 @@ export class ConversationManager implements IConversationStateManager {
       .addIndex('idxSendAt', ['sendAt'], false, Order.DESC)
       .addNullable([
         'messageText',
-        'messageFile',
+        'messageBinary',
         'receivers',
         'read',
         'readBy',
@@ -142,7 +146,7 @@ export class ConversationManager implements IConversationStateManager {
       .addIndex('idxTime', ['time'], false, Order.DESC);
 
     builder
-      .createTable('pending-conversation')
+      .createTable('pendingConversation')
       .addColumn('id', Type.STRING)
       .addColumn('conversationId', Type.STRING)
       .addColumn('receiverId', Type.STRING)
@@ -152,14 +156,14 @@ export class ConversationManager implements IConversationStateManager {
     return builder.connect();
   }
 
-  disconnect() {
+  close() {
     if (this.db) {
       this.db.close();
     }
   }
 
   async getPendingConversations(userID: string): Promise<ConversationState[]> {
-    const pendingTable = this.db.getSchema().table('pending-conversation');
+    const pendingTable = this.db.getSchema().table('pendingConversation');
     const pendings = await this.db
       .select()
       .from(pendingTable)
@@ -182,7 +186,7 @@ export class ConversationManager implements IConversationStateManager {
   }
 
   async addPendingConversation(payload: PendingConversationPayload) {
-    const pendingTable = this.db.getSchema().table('pending-conversation');
+    const pendingTable = this.db.getSchema().table('pendingConversation');
     const row = pendingTable.createRow({
       id: `${payload.conversationId}-${payload.receiverId}`,
       receiverId: payload.receiverId,

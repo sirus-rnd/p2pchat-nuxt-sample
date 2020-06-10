@@ -13,6 +13,7 @@ interface Conversation {
 }
 
 @Component({
+  middleware: ['authenticated'],
   filters: {
     ago: AgoFilter
   }

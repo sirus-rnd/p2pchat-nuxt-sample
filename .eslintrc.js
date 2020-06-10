@@ -18,6 +18,8 @@ module.exports = {
     "standard/computed-property-even-spacing": "off",
     "camelcase": [2, {"properties": "never"}],
     "no-useless-constructor": "off",
-    "lines-between-class-members": "off"
+    "lines-between-class-members": "off",
+    "no-unused-vars": "off",
+    "@typescript-eslint/no-unused-vars": "off"
   }
 };

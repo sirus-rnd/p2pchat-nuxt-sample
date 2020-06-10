@@ -105,16 +105,21 @@ export class ChatClient implements IChatClient {
       });
     });
 
+    // set our current profile
+    this.profile = {
+      id: profile.getId(),
+      name: profile.getName(),
+      photo: profile.getPhoto(),
+      online: false
+    } as User;
+
     // set ICE server resolvers
     this.iceServers = profile.getServersList().map((raw) => {
       const server = raw.toObject();
       const ice = {
         urls: server.url
       } as RTCIceServer;
-      if (
-        server.credentialtype !== null &&
-        server.credentialtype !== undefined
-      ) {
+      if (server.credentialtype !== ICECredentialType.NONE) {
         ice.username = server.username;
         switch (server.credentialtype) {
           case ICECredentialType.OAUTH:
@@ -148,12 +153,7 @@ export class ChatClient implements IChatClient {
     await this.initSDPSignal();
 
     // return our current profile
-    this.profile = {
-      id: profile.getId(),
-      name: profile.getName(),
-      photo: profile.getPhoto(),
-      online: true
-    } as User;
+    this.profile.online = true;
     return this.profile;
   }
 
@@ -186,6 +186,10 @@ export class ChatClient implements IChatClient {
     rooms.getRoomsList().forEach((room) => {
       room.getUsersList().forEach((user) => {
         const id = user.getId();
+        // skip our own profile
+        if (id === this.profile.id) {
+          return null;
+        }
         if (!userIds.includes(user.getId())) {
           userIds.push(id);
           users.push(user);
@@ -645,10 +649,16 @@ export class ChatClient implements IChatClient {
     ) => {
       await this.channels[id].localConnection.addIceCandidate(event.candidate);
     };
+
+    // when receiving channel established, handle incoming message
     this.channels[id].remoteConnection.ondatachannel = (
       ev: RTCDataChannelEvent
     ) => {
       this.channels[id].receiveChannel = ev.channel;
+      // parse message from receive channel
+      this.channels[id].receiveChannel.onmessage = (ev: MessageEvent) => {
+        this.handleIncomingMessage(id, ev);
+      };
     };
 
     // create SDP offers
@@ -681,33 +691,32 @@ export class ChatClient implements IChatClient {
       this.channels[id].connected = false;
       this.channels[id]._onDisconnected.next(null);
     };
+  }
 
-    // parse message from receive channel
-    this.channels[id].receiveChannel.onmessage = (ev: MessageEvent) => {
-      const msg: MessagingProtocol = JSON.parse(ev.data);
-      switch (msg.type) {
-        case MessagingType.MessageNew: {
-          const payload = msg.payload as NewMessagePayload;
-          this.channels[id]._onReceiveMessage.next(payload);
-          break;
-        }
-        case MessagingType.MessageRead: {
-          const payload = msg.payload as MessageReadPayload;
-          this.channels[id]._onMessageRead.next(payload);
-          break;
-        }
-        case MessagingType.MessageReceived: {
-          const payload = msg.payload as MessageReadPayload;
-          this.channels[id]._onMessageReceived.next(payload);
-          break;
-        }
-        case MessagingType.Typing: {
-          const payload = msg.payload as TypingPayload;
-          this.channels[id]._onUserTyping.next(payload);
-          break;
-        }
+  private handleIncomingMessage(id: string, ev: MessageEvent) {
+    const msg: MessagingProtocol = JSON.parse(ev.data);
+    switch (msg.type) {
+      case MessagingType.MessageNew: {
+        const payload = msg.payload as NewMessagePayload;
+        this.channels[id]._onReceiveMessage.next(payload);
+        break;
       }
-    };
+      case MessagingType.MessageRead: {
+        const payload = msg.payload as MessageReadPayload;
+        this.channels[id]._onMessageRead.next(payload);
+        break;
+      }
+      case MessagingType.MessageReceived: {
+        const payload = msg.payload as MessageReadPayload;
+        this.channels[id]._onMessageReceived.next(payload);
+        break;
+      }
+      case MessagingType.Typing: {
+        const payload = msg.payload as TypingPayload;
+        this.channels[id]._onUserTyping.next(payload);
+        break;
+      }
+    }
   }
 
   private async resendPendingConversation(userID: string) {

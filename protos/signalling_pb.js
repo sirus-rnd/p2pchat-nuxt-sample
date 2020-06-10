@@ -4945,8 +4945,9 @@ proto.protos.UserInstanceEventPayload.prototype.setPhoto = function(value) {
  * @enum {number}
  */
 proto.protos.ICECredentialType = {
-  PASSWORD: 0,
-  OAUTH: 1
+  NONE: 0,
+  PASSWORD: 1,
+  OAUTH: 2
 };
 
 /**

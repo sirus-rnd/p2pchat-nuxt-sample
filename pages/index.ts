@@ -10,6 +10,6 @@ import { Component, Vue } from 'vue-property-decorator';
  */
 export default class IndexPage extends Vue {
   mounted() {
-    this.$router.push({ path: '/login' });
+    this.$router.push({ path: '/rooms' });
   }
 }
