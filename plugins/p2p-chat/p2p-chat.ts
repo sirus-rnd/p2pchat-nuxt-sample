@@ -51,7 +51,8 @@ export interface UserInRoomEventPayload {
 export interface IChatClient {
   profile: User;
   authenticated(): Promise<boolean>;
-  connect(token: string): Promise<User>;
+  login(token: string): Promise<User>;
+  connect(): Promise<void>;
   disconnect(): Promise<void>;
   myProfile(): Promise<User>;
   getRooms(): Promise<Room[]>;

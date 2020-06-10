@@ -1,16 +1,9 @@
 import { company, random, internet, lorem, date } from 'faker';
 import { Component, Vue } from 'vue-property-decorator';
-import { Room } from '~/protos/signalling_pb';
+import { Mutation, State, Action } from 'vuex-class';
 import { AgoFilter } from '~/filters/ago';
-
-interface Conversation {
-  id: string;
-  receive?: boolean;
-  message: string;
-  sentAt: Date;
-  read?: boolean;
-  sent?: boolean;
-}
+import { RootState } from '~/store';
+import { Room, Conversation } from '~/store/room';
 
 @Component({
   middleware: ['authenticated'],
@@ -19,57 +12,58 @@ interface Conversation {
   }
 })
 export default class RoomsPage extends Vue {
-  rooms: Room.AsObject[] = [];
-  conversations: Conversation[] = [];
-  activeRoom: Room.AsObject = {
-    id: '',
-    name: '',
-    photo: '',
-    description: '',
-    usersList: []
-  };
+  @State((state: RootState) => state?.room?.loadingRoom)
+  loadingRoom: boolean;
+  @State((state: RootState) => state?.room?.error) error: Error;
+  @State((state: RootState) => state?.room?.rooms) rooms: Room[];
+  @State((state: RootState) => state?.room?.activeRoom) activeRoom: Room;
+  @State((state: RootState) => state?.room?.loadingConversation)
+  loadingConversation: boolean;
+  @State((state: RootState) => state?.room?.conversations)
+  conversations: Conversation[];
 
-  mounted() {
-    this.rooms = this.fakeRooms(22);
-    this.activeRoom = random.arrayElement(this.rooms);
+  @Action('room/loadRooms') loadRooms;
+  @Action('room/selectRoom') selectRoom;
+  @Action('room/loadNextConversation') loadNextConversation;
+  @Action('room/typeMessage') typeMessage;
+  @Action('room/sendMessage') sendMessage;
+  @Action('room/readMessage') readMessage;
+  @Action('room/subscribeConversationActivity') subscribeConversationActivity;
+
+  message: string = '';
+
+  get couldSendMessage(): boolean {
+    return !this.loadingConversation && !this.loadingRoom && !!this.activeRoom;
   }
 
-  sendMessage() {}
+  async mounted() {
+    await this.$p2pchat.connect();
+    await this.loadRooms();
+    this.subscribeConversationActivity();
+  }
+
+  typeTimer: NodeJS.Timeout;
+  typing() {
+    if (this.typeTimer) {
+      clearTimeout(this.typeTimer);
+      this.typeTimer = null;
+    }
+    this.typeTimer = setTimeout(() => {
+      this.typeMessage();
+    }, 800);
+  }
+
+  async send(msg: string) {
+    await this.sendMessage(msg);
+    this.message = '';
+  }
+
+  async readConversation(conv: Conversation) {
+    if (conv.read) {
+      return null;
+    }
+    await this.readMessage(conv.id);
+  }
+
   uploadFile() {}
-
-  openRoom(room: Room.AsObject) {
-    this.conversations = this.fakeConversations(54);
-    this.activeRoom = room;
-  }
-
-  fakeRooms(n: number = 20): Room.AsObject[] {
-    const rooms: Room.AsObject[] = [];
-    for (let i = 0; i < n; i++) {
-      rooms.push({
-        id: random.alphaNumeric(12),
-        name: company.companyName(),
-        photo: internet.avatar(),
-        description: lorem.sentence(10),
-        usersList: []
-      });
-    }
-    return rooms;
-  }
-
-  fakeConversations(n: number = 20): Conversation[] {
-    const conversations: Conversation[] = [];
-    for (let i = 0; i < n; i++) {
-      const receive = random.boolean();
-      const sent = random.boolean();
-      conversations.push({
-        id: random.alphaNumeric(12),
-        receive,
-        message: lorem.sentence(10),
-        sentAt: date.recent(),
-        read: sent ? random.boolean() : false,
-        sent
-      });
-    }
-    return conversations;
-  }
 }

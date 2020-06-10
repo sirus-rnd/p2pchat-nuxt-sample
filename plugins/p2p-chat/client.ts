@@ -91,7 +91,7 @@ export class ChatClient implements IChatClient {
     return true;
   }
 
-  async connect(token: string): Promise<User> {
+  async login(token: string): Promise<User> {
     // persist token
     await this.setAccessToken(token);
 
@@ -106,6 +106,26 @@ export class ChatClient implements IChatClient {
     });
 
     // set our current profile
+    return {
+      id: profile.getId(),
+      name: profile.getName(),
+      photo: profile.getPhoto(),
+      online: false
+    } as User;
+  }
+
+  async connect(): Promise<void> {
+    const token = await this.getAccessToken();
+    // get signalling profile
+    const profile = await new Promise<Profile>((resolve, reject) => {
+      this.signaling.getProfile(new Empty(), { token }, (err, res) => {
+        if (err) {
+          return reject(err);
+        }
+        resolve(res);
+      });
+    });
+
     this.profile = {
       id: profile.getId(),
       name: profile.getName(),
@@ -152,9 +172,8 @@ export class ChatClient implements IChatClient {
     await this.makeChannels(this.rooms);
     await this.initSDPSignal();
 
-    // return our current profile
+    // set our current profile
     this.profile.online = true;
-    return this.profile;
   }
 
   async myProfile(): Promise<User> {
@@ -383,6 +402,9 @@ export class ChatClient implements IChatClient {
 
     await Promise.all(
       participants.map(async (id) => {
+        if (id === this.profile.id) {
+          return;
+        }
         const chan = this.channels[id];
         if (!chan || !chan.connected) {
           await this.conversationManager.addPendingConversation({

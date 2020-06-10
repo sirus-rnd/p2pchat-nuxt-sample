@@ -14,7 +14,7 @@ export default class LoginPage extends Vue {
   async connect() {
     this.loading = true;
     try {
-      await this.$p2pchat.connect(this.token);
+      await this.$p2pchat.login(this.token);
       this.$router.push({ path: '/rooms' });
     } catch (err) {
       this.errorToast = true;

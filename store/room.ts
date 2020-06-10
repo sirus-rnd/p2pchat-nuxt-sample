@@ -72,7 +72,7 @@ export function state(): RoomState {
   };
 }
 
-export const mutation: MutationTree<RoomState> = {
+export const mutations: MutationTree<RoomState> = {
   loadRooms(state) {
     state.error = null;
     state.loadingRoom = true;
@@ -314,11 +314,14 @@ export const actions: ActionTree<RoomState, RootState> = {
     }
   },
   async readMessage({ commit, state }, conversationID: string) {
-    const c = await this.$p2pchat.readMessage(
-      state.activeRoom?.id,
-      conversationID
-    );
-    commit('readMessage', conversationID);
+    const idx = state.conversations.findIndex((c) => c.id === conversationID);
+    if (idx === -1) {
+      return null;
+    }
+    if (!state.conversations[idx].read) {
+      await this.$p2pchat.readMessage(state.activeRoom?.id, conversationID);
+      commit('readMessage', conversationID);
+    }
   },
   subscribeConversationActivity({ commit, dispatch, state }) {
     this.$p2pchat.onMessageRead.subscribe((conv) => {
