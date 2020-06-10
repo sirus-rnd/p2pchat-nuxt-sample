@@ -98,6 +98,7 @@ export interface IConversationStateManager {
   readMessage(payload: MessageReadPayload): Promise<ConversationState>;
   messageReceived(payload: MessageReceivedPayload): Promise<ConversationState>;
   messageRead(payload: MessageReadPayload): Promise<ConversationState>;
+  reset(): Promise<void>;
 }
 
 export class ConversationManager implements IConversationStateManager {
@@ -105,6 +106,24 @@ export class ConversationManager implements IConversationStateManager {
 
   async init() {
     this.db = await this.connect();
+  }
+
+  async reset(): Promise<void> {
+    const pendingTable = this.db.getSchema().table('pendingConversation');
+    const convTable = this.db.getSchema().table('conversations');
+    const actionTable = this.db.getSchema().table('action');
+    await this.db
+      .delete()
+      .from(pendingTable)
+      .exec();
+    await this.db
+      .delete()
+      .from(convTable)
+      .exec();
+    await this.db
+      .delete()
+      .from(actionTable)
+      .exec();
   }
 
   private connect(): Promise<Database> {

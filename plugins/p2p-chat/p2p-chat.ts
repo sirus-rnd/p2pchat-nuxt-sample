@@ -17,6 +17,7 @@ export interface Room {
 
 export interface Conversation {
   id: string;
+  isReceiver: boolean;
   roomID: string;
   sendAt: Date;
   message: Message;
@@ -48,6 +49,7 @@ export interface UserInRoomEventPayload {
 }
 
 export interface IChatClient {
+  profile: User;
   authenticated(): Promise<boolean>;
   connect(token: string): Promise<User>;
   disconnect(): Promise<void>;

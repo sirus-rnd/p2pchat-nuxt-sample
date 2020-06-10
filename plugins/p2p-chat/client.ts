@@ -43,7 +43,7 @@ import {
 export const ACCESS_KEY = 'access-token';
 
 export class ChatClient implements IChatClient {
-  private profile: User;
+  profile: User;
   private iceServers: RTCIceServer[] = [];
   private channels: { [userID: string]: UserChannel } = {};
   private rooms: Rooms;
@@ -242,6 +242,8 @@ export class ChatClient implements IChatClient {
     );
     // remove access token
     await this.storage.removeItem(ACCESS_KEY);
+    // clear conversation history
+    await this.conversationManager.reset();
   }
 
   async getRooms(): Promise<Room[]> {
@@ -348,6 +350,7 @@ export class ChatClient implements IChatClient {
 
     return {
       id: state.id,
+      isReceiver: state.isReceiver,
       message: {
         type: state.messageType,
         content
