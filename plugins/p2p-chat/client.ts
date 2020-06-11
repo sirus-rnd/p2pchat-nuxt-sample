@@ -1,6 +1,6 @@
 import * as LocalForage from 'localforage';
 import { grpc } from '@improbable-eng/grpc-web';
-import { Observable, concat, Subject } from 'rxjs';
+import { Observable, merge, Subject } from 'rxjs';
 import { v4 as uuid } from 'uuid';
 import { map, flatMap } from 'rxjs/operators';
 import { Empty } from 'google-protobuf/google/protobuf/empty_pb';
@@ -37,7 +37,9 @@ import {
   SDP,
   SDPTypes,
   SDPParam,
-  ICECredentialType
+  ICECredentialType,
+  ICEParam,
+  ICEOffer
 } from '~/protos/signalling_pb';
 
 export const ACCESS_KEY = 'access-token';
@@ -55,6 +57,9 @@ export class ChatClient implements IChatClient {
   onMessageRead: Observable<Conversation> = new Observable();
   onReceiveMessage: Observable<Conversation> = new Observable();
   onUserTyping: Observable<UserInRoomEventPayload> = new Observable();
+  // signalling request handler
+  private sdpCommandSub: grpc.Request;
+  private iceOfferSub: grpc.Request;
   // signalling events
   private _onRoomCreated = new Subject<Room>();
   private _onRoomUpdated = new Subject<Room>();
@@ -114,6 +119,30 @@ export class ChatClient implements IChatClient {
     } as User;
   }
 
+  async reconnect(): Promise<void> {
+    const userIds = Object.keys(this.channels);
+    // disconnect from all channel
+    await Promise.all(
+      userIds.map((id) => {
+        return this.disconnectToChannel(id);
+      })
+    );
+    // close signalling channel
+    if (this.sdpCommandSub) {
+      this.sdpCommandSub.close();
+    }
+    if (this.iceOfferSub) {
+      this.iceOfferSub.close();
+    }
+    // clear event subscriptions
+    this.onMessageReceived = new Observable();
+    this.onMessageRead = new Observable();
+    this.onReceiveMessage = new Observable();
+    this.onUserTyping = new Observable();
+    // reconn
+    await this.connect();
+  }
+
   async connect(): Promise<void> {
     const token = await this.getAccessToken();
     // get signalling profile
@@ -171,6 +200,7 @@ export class ChatClient implements IChatClient {
     // make channels & intiate SDP signaling
     await this.makeChannels(this.rooms);
     await this.initSDPSignal();
+    await this.initICEOfferSignal();
 
     // set our current profile
     this.profile.online = true;
@@ -259,6 +289,13 @@ export class ChatClient implements IChatClient {
         return this.disconnectToChannel(id);
       })
     );
+    // close signaling channel
+    if (this.sdpCommandSub) {
+      this.sdpCommandSub.close();
+    }
+    if (this.iceOfferSub) {
+      this.iceOfferSub.close();
+    }
     // remove access token
     await this.storage.removeItem(ACCESS_KEY);
     // clear conversation history
@@ -369,6 +406,7 @@ export class ChatClient implements IChatClient {
 
     return {
       id: state.id,
+      roomID: state.roomID,
       isReceiver: state.isReceiver,
       message: {
         type: state.messageType,
@@ -417,6 +455,7 @@ export class ChatClient implements IChatClient {
           type: MessagingType.MessageNew,
           payload: {
             id: convState.id,
+            roomID,
             sendAt: convState.sendAt,
             messageType: message.type,
             messageContent: message.content
@@ -509,68 +548,33 @@ export class ChatClient implements IChatClient {
     this.channels[id] = new UserChannel(id, user.name, user.photo);
 
     // add each user connection event to central connection stream
-    this.onUserConnected = concat(
+    this.onUserConnected = merge(
       this.onUserConnected,
       this.channels[id].onConnected.pipe(map(() => id))
     );
-    this.onUserDisconnected = concat(
+    this.onUserDisconnected = merge(
       this.onUserDisconnected,
       this.channels[id].onDisconnected.pipe(map(() => id))
     );
 
     // hookup conversation state change
-    this.onMessageReceived = concat(
+    this.onMessageReceived = merge(
       this.onMessageReceived,
-      this.channels[id].onMessageReceived.pipe(
-        flatMap((payload) =>
-          this.conversationManager.messageReceived({
-            id: payload.id,
-            receivedBy: id
-          })
-        ),
-        map((state) => this.mapConversationFromState(state))
-      )
+      this.channels[id].onMessageReceived
     );
-    this.onMessageRead = concat(
+    this.onMessageRead = merge(
       this.onMessageRead,
-      this.channels[id].onMessageRead.pipe(
-        flatMap((payload) =>
-          this.conversationManager.messageRead({
-            id: payload.id,
-            readerID: id
-          })
-        ),
-        map((state) => this.mapConversationFromState(state))
-      )
+      this.channels[id].onMessageRead
     );
-    this.onReceiveMessage = concat(
+    this.onReceiveMessage = merge(
       this.onReceiveMessage,
-      this.channels[id].onReceiveMessage.pipe(
-        flatMap((payload) =>
-          this.conversationManager.receiveMessage({
-            id: payload.id,
-            roomID: payload.roomID,
-            senderID: id,
-            content: payload.messageContent,
-            type: payload.messageType,
-            sentAt: payload.sendAt
-          })
-        ),
-        map((state) => this.mapConversationFromState(state))
-      )
+      this.channels[id].onReceiveMessage
     );
 
     // user typing event stream
-    this.onUserTyping = concat(
+    this.onUserTyping = merge(
       this.onUserTyping,
-      this.channels[id].onUserTyping.pipe(
-        map((payload) => {
-          return {
-            roomID: payload.roomID,
-            user: this.getUserbyID(id)
-          };
-        })
-      )
+      this.channels[id].onUserTyping
     );
 
     return this.channels[id];
@@ -581,9 +585,42 @@ export class ChatClient implements IChatClient {
     delete this.channels[id];
   }
 
+  private async initICEOfferSignal() {
+    const token = await this.getAccessToken();
+    this.iceOfferSub = grpc.invoke(SignalingService.SubscribeICECandidate, {
+      request: new Empty(),
+      host: this.signaling.hostname_,
+      metadata: { token },
+      onMessage: (data: ICEOffer) => {
+        const payload = data.toObject();
+        const id = payload.senderid;
+        const candidate: RTCIceCandidate = JSON.parse(payload.candidate);
+        console.log('receive ICE candidate', candidate);
+        if (!this.channels[id]) {
+          return null;
+        }
+        try {
+          if (payload.isremote) {
+            this.channels[id].localConnection.addIceCandidate(candidate);
+          } else {
+            this.channels[id].remoteConnection.addIceCandidate(candidate);
+          }
+        } catch (err) {
+          console.error(err);
+        }
+      },
+      onEnd: (code: grpc.Code, msg: string | undefined, _: grpc.Metadata) => {
+        if (code !== grpc.Code.OK) {
+          throw new Error(msg);
+        }
+      },
+      transport: grpc.WebsocketTransport()
+    });
+  }
+
   private async initSDPSignal() {
     const token = await this.getAccessToken();
-    grpc.invoke(SignalingService.SubscribeSDPCommand, {
+    this.sdpCommandSub = grpc.invoke(SignalingService.SubscribeSDPCommand, {
       request: new Empty(),
       host: this.signaling.hostname_,
       metadata: { token },
@@ -599,16 +636,18 @@ export class ChatClient implements IChatClient {
               type: 'offer',
               sdp: payload.description
             };
-            this.channels[id].localConnection.setLocalDescription(offer);
+            console.log('receive offer', payload);
             this.channels[id].remoteConnection.setRemoteDescription(offer);
 
             // create answer
             const answer = await this.channels[
               id
             ].remoteConnection.createAnswer();
+            console.log('send answer', answer);
+            this.channels[id].remoteConnection.setLocalDescription(answer);
             const param = new SDPParam();
             param.setUserid(id);
-            param.setDescription(JSON.stringify(answer.sdp));
+            param.setDescription(answer.sdp);
             const token = await this.getAccessToken();
             await new Promise((resolve, reject) => {
               this.signaling.answerSessionDescription(
@@ -633,8 +672,8 @@ export class ChatClient implements IChatClient {
               type: 'answer',
               sdp: payload.description
             };
+            console.log('receive answer', payload);
             this.channels[id].localConnection.setRemoteDescription(answer);
-            this.channels[id].remoteConnection.setLocalDescription(answer);
             break;
           }
         }
@@ -648,7 +687,7 @@ export class ChatClient implements IChatClient {
     });
   }
 
-  private async connectToChannel(id: string) {
+  private connectToChannel(id: string) {
     if (!this.isChannelExists(id)) {
       throw new Error('channel not exists');
     }
@@ -658,11 +697,14 @@ export class ChatClient implements IChatClient {
     });
     this.channels[id].sendChannel = this.channels[
       id
-    ].localConnection.createDataChannel('chat');
+    ].localConnection.createDataChannel(uuid());
     this.channels[id].localConnection.onicecandidate = async (
       event: RTCPeerConnectionIceEvent
     ) => {
-      await this.channels[id].remoteConnection.addIceCandidate(event.candidate);
+      if (!event.candidate) {
+        return null;
+      }
+      await this.sendICECandidate(event.candidate, id, false);
     };
 
     // create receiving channel
@@ -672,41 +714,67 @@ export class ChatClient implements IChatClient {
     this.channels[id].remoteConnection.onicecandidate = async (
       event: RTCPeerConnectionIceEvent
     ) => {
-      await this.channels[id].localConnection.addIceCandidate(event.candidate);
+      if (!event.candidate) {
+        return null;
+      }
+      await this.sendICECandidate(event.candidate, id, true);
     };
 
     // when receiving channel established, handle incoming message
     this.channels[id].remoteConnection.ondatachannel = (
       ev: RTCDataChannelEvent
     ) => {
+      console.log('receive data channel request');
       this.channels[id].receiveChannel = ev.channel;
+      this.channels[id].receiveChannel.onopen = () => {
+        console.log('receive channel opened');
+      };
+      this.channels[id].receiveChannel.onclose = () => {
+        console.log('receive channel closed');
+      };
       // parse message from receive channel
       this.channels[id].receiveChannel.onmessage = (ev: MessageEvent) => {
+        console.log('receive message', ev.data);
         this.handleIncomingMessage(id, ev);
+      };
+      this.channels[id].receiveChannel.onerror = (err) => {
+        console.error('receive channel error', err);
       };
     };
 
-    // create SDP offers
-    const offer = await this.channels[id].localConnection.createOffer();
-    const param = new SDPParam();
-    param.setUserid(id);
-    param.setDescription(offer.sdp);
-    const token = await this.getAccessToken();
-    await new Promise((resolve, reject) => {
-      this.signaling.offerSessionDescription(
-        param,
-        { token },
-        (err, response) => {
-          if (err) {
-            reject(err);
+    this.channels[id].localConnection.oniceconnectionstatechange = (ev) => {
+      console.log('ice state chanmge', ev);
+    };
+
+    this.channels[id].localConnection.onnegotiationneeded = async () => {
+      // create SDP offers
+      const offer = await this.channels[id].localConnection.createOffer();
+      this.channels[id].localConnection.setLocalDescription(offer);
+      console.log('send offer', JSON.stringify(offer.sdp, null, 2));
+      const param = new SDPParam();
+      param.setUserid(id);
+      param.setDescription(offer.sdp);
+      const token = await this.getAccessToken();
+      await new Promise((resolve, reject) => {
+        this.signaling.offerSessionDescription(
+          param,
+          { token },
+          (err, response) => {
+            if (err) {
+              reject(err);
+            }
+            resolve(response);
           }
-          resolve(response);
-        }
-      );
-    });
+        );
+      });
+    };
 
     // update connection status
+    this.channels[id].sendChannel.onerror = (err) => {
+      console.error('send channel error', err);
+    };
     this.channels[id].sendChannel.onopen = () => {
+      console.log('sen channel connected');
       this.channels[id].connected = true;
       this.channels[id]._onConnected.next(null);
       // resend pending conversations
@@ -718,27 +786,76 @@ export class ChatClient implements IChatClient {
     };
   }
 
-  private handleIncomingMessage(id: string, ev: MessageEvent) {
+  private async sendICECandidate(
+    iceCandidate: RTCIceCandidate,
+    id: string,
+    isRemote: boolean
+  ) {
+    console.log(`${isRemote ? 'remote' : 'local'} ICE candidate`, iceCandidate);
+    // send ICE candidate offer
+    const param = new ICEParam();
+    param.setUserid(id);
+    param.setIsremote(isRemote);
+    param.setCandidate(JSON.stringify(iceCandidate));
+    const token = await this.getAccessToken();
+    await new Promise((resolve, reject) => {
+      this.signaling.sendICECandidate(param, { token }, (err, response) => {
+        if (err) {
+          reject(err);
+        }
+        resolve(response);
+      });
+    });
+  }
+
+  private async handleIncomingMessage(id: string, ev: MessageEvent) {
     const msg: MessagingProtocol = JSON.parse(ev.data);
     switch (msg.type) {
       case MessagingType.MessageNew: {
         const payload = msg.payload as NewMessagePayload;
-        this.channels[id]._onReceiveMessage.next(payload);
+        console.log('receive message payload', payload);
+        const conv = await this.conversationManager.receiveMessage({
+          id: payload.id,
+          roomID: payload.roomID,
+          senderID: id,
+          content: payload.messageContent,
+          type: payload.messageType,
+          sentAt: new Date(payload.sendAt)
+        });
+        console.log('receive message from conv', conv);
+        this.channels[id]._onReceiveMessage.next(
+          this.mapConversationFromState(conv)
+        );
         break;
       }
       case MessagingType.MessageRead: {
         const payload = msg.payload as MessageReadPayload;
-        this.channels[id]._onMessageRead.next(payload);
+        const conv = await this.conversationManager.messageRead({
+          id: payload.id,
+          readerID: id
+        });
+        this.channels[id]._onMessageRead.next(
+          this.mapConversationFromState(conv)
+        );
         break;
       }
       case MessagingType.MessageReceived: {
         const payload = msg.payload as MessageReadPayload;
-        this.channels[id]._onMessageReceived.next(payload);
+        const conv = await this.conversationManager.messageReceived({
+          id: payload.id,
+          receivedBy: id
+        });
+        this.channels[id]._onMessageReceived.next(
+          this.mapConversationFromState(conv)
+        );
         break;
       }
       case MessagingType.Typing: {
         const payload = msg.payload as TypingPayload;
-        this.channels[id]._onUserTyping.next(payload);
+        this.channels[id]._onUserTyping.next({
+          roomID: payload.roomID,
+          user: this.getUserbyID(id)
+        });
         break;
       }
     }
@@ -759,7 +876,7 @@ export class ChatClient implements IChatClient {
           case MessageType.MESSAGE:
             messageContent = conv.messageText;
         }
-        this.sendChannelMessage(conv.id, {
+        this.sendChannelMessage(userID, {
           type: MessagingType.MessageNew,
           payload: {
             id: conv.id,
@@ -791,6 +908,7 @@ export class ChatClient implements IChatClient {
     if (!this.channels[id]?.sendChannel || !this.channels[id].connected) {
       throw new Error(`user ${id} offline`);
     }
+    console.log('send message', message);
     this.channels[id].sendChannel.send(JSON.stringify(message));
   }
 

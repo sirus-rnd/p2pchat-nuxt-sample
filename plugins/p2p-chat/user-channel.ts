@@ -1,10 +1,5 @@
 import { Observable, Subject } from 'rxjs';
-import {
-  NewMessagePayload,
-  MessageReadPayload,
-  TypingPayload,
-  MessageReceivedPayload
-} from './messaging';
+import { Conversation, UserInRoomEventPayload } from './p2p-chat';
 
 export class UserChannel {
   connected: boolean;
@@ -15,10 +10,10 @@ export class UserChannel {
   receiveChannel: RTCDataChannel;
   _onConnected = new Subject<void>();
   _onDisconnected = new Subject<string>();
-  _onMessageReceived = new Subject<MessageReceivedPayload>();
-  _onReceiveMessage = new Subject<NewMessagePayload>();
-  _onMessageRead = new Subject<MessageReadPayload>();
-  _onUserTyping = new Subject<TypingPayload>();
+  _onMessageReceived = new Subject<Conversation>();
+  _onReceiveMessage = new Subject<Conversation>();
+  _onMessageRead = new Subject<Conversation>();
+  _onUserTyping = new Subject<UserInRoomEventPayload>();
   onConnected: Observable<void> = this._onConnected.asObservable();
   onDisconnected: Observable<string> = this._onDisconnected.asObservable();
   onMessageReceived = this._onMessageReceived.asObservable();

@@ -211,6 +211,24 @@ type SignalingServiceSubscribeRoomEvent = {
   readonly responseType: typeof signalling_pb.RoomEvent;
 };
 
+type SignalingServiceSendICECandidate = {
+  readonly methodName: string;
+  readonly service: typeof SignalingService;
+  readonly requestStream: false;
+  readonly responseStream: false;
+  readonly requestType: typeof signalling_pb.ICEParam;
+  readonly responseType: typeof google_protobuf_empty_pb.Empty;
+};
+
+type SignalingServiceSubscribeICECandidate = {
+  readonly methodName: string;
+  readonly service: typeof SignalingService;
+  readonly requestStream: false;
+  readonly responseStream: true;
+  readonly requestType: typeof google_protobuf_empty_pb.Empty;
+  readonly responseType: typeof signalling_pb.ICEOffer;
+};
+
 export class SignalingService {
   static readonly serviceName: string;
   static readonly GetProfile: SignalingServiceGetProfile;
@@ -221,6 +239,8 @@ export class SignalingService {
   static readonly AnswerSessionDescription: SignalingServiceAnswerSessionDescription;
   static readonly SubscribeSDPCommand: SignalingServiceSubscribeSDPCommand;
   static readonly SubscribeRoomEvent: SignalingServiceSubscribeRoomEvent;
+  static readonly SendICECandidate: SignalingServiceSendICECandidate;
+  static readonly SubscribeICECandidate: SignalingServiceSubscribeICECandidate;
 }
 
 export type ServiceError = { message: string, code: number; metadata: grpc.Metadata }
@@ -434,5 +454,15 @@ export class SignalingServiceClient {
   ): UnaryResponse;
   subscribeSDPCommand(requestMessage: google_protobuf_empty_pb.Empty, metadata?: grpc.Metadata): ResponseStream<signalling_pb.SDP>;
   subscribeRoomEvent(requestMessage: google_protobuf_empty_pb.Empty, metadata?: grpc.Metadata): ResponseStream<signalling_pb.RoomEvent>;
+  sendICECandidate(
+    requestMessage: signalling_pb.ICEParam,
+    metadata: grpc.Metadata,
+    callback: (error: ServiceError|null, responseMessage: google_protobuf_empty_pb.Empty|null) => void
+  ): UnaryResponse;
+  sendICECandidate(
+    requestMessage: signalling_pb.ICEParam,
+    callback: (error: ServiceError|null, responseMessage: google_protobuf_empty_pb.Empty|null) => void
+  ): UnaryResponse;
+  subscribeICECandidate(requestMessage: google_protobuf_empty_pb.Empty, metadata?: grpc.Metadata): ResponseStream<signalling_pb.ICEOffer>;
 }
 

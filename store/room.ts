@@ -106,7 +106,7 @@ export const mutations: MutationTree<RoomState> = {
     state.loadingConversation = true;
   },
   nextConversationLoaded(state, conversations: Conversation[]) {
-    state.conversations = state.conversations.concat(conversations);
+    state.conversations = conversations.concat(state.conversations);
     state.loadingConversation = false;
   },
   errorLoadConversation(state, error: Error) {
@@ -168,12 +168,12 @@ export const mutations: MutationTree<RoomState> = {
     const idx = state.rooms.findIndex((room) => room.id === participant.roomID);
     if (idx > -1) {
       if (!state.rooms[idx].typings.includes(participant.userID)) {
-        state.rooms[idx].typings.push(participant.roomID);
+        state.rooms[idx].typings.push(participant.userID);
       }
     }
     if (state.activeRoom.id === participant.roomID) {
       if (!state.activeRoom.typings.includes(participant.userID)) {
-        state.activeRoom.typings.push(participant.roomID);
+        state.activeRoom.typings.push(participant.userID);
       }
     }
   },
@@ -238,18 +238,20 @@ export const actions: ActionTree<RoomState, RootState> = {
       const convos = await this.$p2pchat.getConversations(roomID, 0, 20);
       commit(
         'conversationLoaded',
-        convos.map(
-          (c) =>
-            ({
-              id: c.id,
-              message: c.message.content as string,
-              receive: c.isReceiver,
-              sentAt: c.sendAt,
-              failed: c.status === ConversationStatus.FAILED,
-              read: c.status === ConversationStatus.READ,
-              received: c.status === ConversationStatus.RECEIVED
-            } as Conversation)
-        )
+        convos
+          .map(
+            (c) =>
+              ({
+                id: c.id,
+                message: c.message.content as string,
+                receive: c.isReceiver,
+                sentAt: c.sendAt,
+                failed: c.status === ConversationStatus.FAILED,
+                read: c.status === ConversationStatus.READ,
+                received: c.status === ConversationStatus.RECEIVED
+              } as Conversation)
+          )
+          .reverse()
       );
     } catch (err) {
       commit('errorLoadConversation', err);
@@ -265,18 +267,20 @@ export const actions: ActionTree<RoomState, RootState> = {
       );
       commit(
         'nextConversationLoaded',
-        convos.map(
-          (c) =>
-            ({
-              id: c.id,
-              message: c.message.content as string,
-              receive: c.isReceiver,
-              sentAt: c.sendAt,
-              failed: c.status === ConversationStatus.FAILED,
-              read: c.status === ConversationStatus.READ,
-              received: c.status === ConversationStatus.RECEIVED
-            } as Conversation)
-        )
+        convos
+          .map(
+            (c) =>
+              ({
+                id: c.id,
+                message: c.message.content as string,
+                receive: c.isReceiver,
+                sentAt: c.sendAt,
+                failed: c.status === ConversationStatus.FAILED,
+                read: c.status === ConversationStatus.READ,
+                received: c.status === ConversationStatus.RECEIVED
+              } as Conversation)
+          )
+          .reverse()
       );
     } catch (err) {
       commit('errorLoadConversation', err);
@@ -335,12 +339,17 @@ export const actions: ActionTree<RoomState, RootState> = {
       }
     });
     this.$p2pchat.onUserTyping.subscribe((participant) => {
-      commit('userTyping', {
+      const p = {
         roomID: participant.roomID,
         userID: participant.user?.id
-      } as Participant);
+      } as Participant;
+      commit('userTyping', p);
+      setTimeout(() => {
+        commit('finishTyping', p);
+      }, 1000);
     });
     this.$p2pchat.onReceiveMessage.subscribe((c) => {
+      console.log('receive message from action', c);
       if (c.roomID === state.activeRoom?.id) {
         commit('receiveMessage', {
           id: c.id,

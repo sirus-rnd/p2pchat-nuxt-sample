@@ -1,6 +1,6 @@
 <template>
   <v-app dark>
-    <v-navigation-drawer app clipped width="300px">
+    <v-navigation-drawer v-model="drawer" app width="300px">
       <v-progress-linear v-if="loadingRoom" indeterminate></v-progress-linear>
       <v-list two-line dense>
         <template v-for="(room, index) in rooms">
@@ -33,15 +33,10 @@
       </v-list>
     </v-navigation-drawer>
 
-    <v-app-bar app clipped-left color="primary">
-      <div style="width:300px" class="mr-2">
-        <v-text-field
-          placeholder="Search..."
-          single-line
-          append-icon="mdi-magnify"
-          hide-details
-        ></v-text-field>
-      </div>
+    <v-app-bar app color="primary">
+      <v-btn icon @click="drawer = !drawer">
+        <v-icon>mdi-dots-vertical</v-icon>
+      </v-btn>
       <template v-if="activeRoom">
         <v-list-item>
           <v-list-item-avatar>
@@ -71,6 +66,10 @@
           <v-icon>mdi-phone</v-icon>
         </v-btn>
       </template>
+      <v-spacer></v-spacer>
+      <v-btn icon @click="reconnect()">
+        <v-icon>mdi-reload</v-icon>
+      </v-btn>
       <v-btn icon>
         <v-icon>mdi-dots-vertical</v-icon>
       </v-btn>

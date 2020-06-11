@@ -30,6 +30,7 @@ export default class RoomsPage extends Vue {
   @Action('room/readMessage') readMessage;
   @Action('room/subscribeConversationActivity') subscribeConversationActivity;
 
+  drawer = true;
   message: string = '';
 
   get couldSendMessage(): boolean {
@@ -56,6 +57,11 @@ export default class RoomsPage extends Vue {
   async send(msg: string) {
     await this.sendMessage(msg);
     this.message = '';
+  }
+
+  async reconnect() {
+    await this.$p2pchat.reconnect();
+    this.subscribeConversationActivity();
   }
 
   async readConversation(conv: Conversation) {

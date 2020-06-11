@@ -53,6 +53,7 @@ export interface IChatClient {
   authenticated(): Promise<boolean>;
   login(token: string): Promise<User>;
   connect(): Promise<void>;
+  reconnect(): Promise<void>;
   disconnect(): Promise<void>;
   myProfile(): Promise<User>;
   getRooms(): Promise<Room[]>;

@@ -618,6 +618,24 @@ SignalingService.SubscribeRoomEvent = {
   responseType: signalling_pb.RoomEvent
 };
 
+SignalingService.SendICECandidate = {
+  methodName: "SendICECandidate",
+  service: SignalingService,
+  requestStream: false,
+  responseStream: false,
+  requestType: signalling_pb.ICEParam,
+  responseType: google_protobuf_empty_pb.Empty
+};
+
+SignalingService.SubscribeICECandidate = {
+  methodName: "SubscribeICECandidate",
+  service: SignalingService,
+  requestStream: false,
+  responseStream: true,
+  requestType: google_protobuf_empty_pb.Empty,
+  responseType: signalling_pb.ICEOffer
+};
+
 exports.SignalingService = SignalingService;
 
 function SignalingServiceClient(serviceHost, options) {
@@ -857,6 +875,76 @@ SignalingServiceClient.prototype.subscribeRoomEvent = function subscribeRoomEven
     status: []
   };
   var client = grpc.invoke(SignalingService.SubscribeRoomEvent, {
+    request: requestMessage,
+    host: this.serviceHost,
+    metadata: metadata,
+    transport: this.options.transport,
+    debug: this.options.debug,
+    onMessage: function (responseMessage) {
+      listeners.data.forEach(function (handler) {
+        handler(responseMessage);
+      });
+    },
+    onEnd: function (status, statusMessage, trailers) {
+      listeners.status.forEach(function (handler) {
+        handler({ code: status, details: statusMessage, metadata: trailers });
+      });
+      listeners.end.forEach(function (handler) {
+        handler({ code: status, details: statusMessage, metadata: trailers });
+      });
+      listeners = null;
+    }
+  });
+  return {
+    on: function (type, handler) {
+      listeners[type].push(handler);
+      return this;
+    },
+    cancel: function () {
+      listeners = null;
+      client.close();
+    }
+  };
+};
+
+SignalingServiceClient.prototype.sendICECandidate = function sendICECandidate(requestMessage, metadata, callback) {
+  if (arguments.length === 2) {
+    callback = arguments[1];
+  }
+  var client = grpc.unary(SignalingService.SendICECandidate, {
+    request: requestMessage,
+    host: this.serviceHost,
+    metadata: metadata,
+    transport: this.options.transport,
+    debug: this.options.debug,
+    onEnd: function (response) {
+      if (callback) {
+        if (response.status !== grpc.Code.OK) {
+          var err = new Error(response.statusMessage);
+          err.code = response.status;
+          err.metadata = response.trailers;
+          callback(err, null);
+        } else {
+          callback(null, response.message);
+        }
+      }
+    }
+  });
+  return {
+    cancel: function () {
+      callback = null;
+      client.close();
+    }
+  };
+};
+
+SignalingServiceClient.prototype.subscribeICECandidate = function subscribeICECandidate(requestMessage, metadata) {
+  var listeners = {
+    data: [],
+    end: [],
+    status: []
+  };
+  var client = grpc.invoke(SignalingService.SubscribeICECandidate, {
     request: requestMessage,
     host: this.serviceHost,
     metadata: metadata,

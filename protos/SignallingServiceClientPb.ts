@@ -15,6 +15,8 @@ import * as google_protobuf_timestamp_pb from 'google-protobuf/google/protobuf/t
 import {
   GetRoomParam,
   GetUserParam,
+  ICEOffer,
+  ICEParam,
   NewRoomParam,
   NewUserParam,
   PaginationParam,
@@ -526,6 +528,47 @@ export class SignalingServiceClient {
       request,
       metadata || {},
       this.methodInfoSubscribeRoomEvent);
+  }
+
+  methodInfoSendICECandidate = new grpcWeb.AbstractClientBase.MethodInfo(
+    google_protobuf_empty_pb.Empty,
+    (request: ICEParam) => {
+      return request.serializeBinary();
+    },
+    google_protobuf_empty_pb.Empty.deserializeBinary
+  );
+
+  sendICECandidate(
+    request: ICEParam,
+    metadata: grpcWeb.Metadata | null,
+    callback: (err: grpcWeb.Error,
+               response: google_protobuf_empty_pb.Empty) => void) {
+    return this.client_.rpcCall(
+      this.hostname_ +
+        '/protos.SignalingService/SendICECandidate',
+      request,
+      metadata || {},
+      this.methodInfoSendICECandidate,
+      callback);
+  }
+
+  methodInfoSubscribeICECandidate = new grpcWeb.AbstractClientBase.MethodInfo(
+    ICEOffer,
+    (request: google_protobuf_empty_pb.Empty) => {
+      return request.serializeBinary();
+    },
+    ICEOffer.deserializeBinary
+  );
+
+  subscribeICECandidate(
+    request: google_protobuf_empty_pb.Empty,
+    metadata?: grpcWeb.Metadata) {
+    return this.client_.serverStreaming(
+      this.hostname_ +
+        '/protos.SignalingService/SubscribeICECandidate',
+      request,
+      metadata || {},
+      this.methodInfoSubscribeICECandidate);
   }
 
 }

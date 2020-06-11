@@ -602,6 +602,58 @@ export namespace UserInstanceEventPayload {
   }
 }
 
+export class ICEParam extends jspb.Message {
+  getCandidate(): string;
+  setCandidate(value: string): void;
+
+  getUserid(): string;
+  setUserid(value: string): void;
+
+  getIsremote(): boolean;
+  setIsremote(value: boolean): void;
+
+  serializeBinary(): Uint8Array;
+  toObject(includeInstance?: boolean): ICEParam.AsObject;
+  static toObject(includeInstance: boolean, msg: ICEParam): ICEParam.AsObject;
+  static serializeBinaryToWriter(message: ICEParam, writer: jspb.BinaryWriter): void;
+  static deserializeBinary(bytes: Uint8Array): ICEParam;
+  static deserializeBinaryFromReader(message: ICEParam, reader: jspb.BinaryReader): ICEParam;
+}
+
+export namespace ICEParam {
+  export type AsObject = {
+    candidate: string,
+    userid: string,
+    isremote: boolean,
+  }
+}
+
+export class ICEOffer extends jspb.Message {
+  getCandidate(): string;
+  setCandidate(value: string): void;
+
+  getSenderid(): string;
+  setSenderid(value: string): void;
+
+  getIsremote(): boolean;
+  setIsremote(value: boolean): void;
+
+  serializeBinary(): Uint8Array;
+  toObject(includeInstance?: boolean): ICEOffer.AsObject;
+  static toObject(includeInstance: boolean, msg: ICEOffer): ICEOffer.AsObject;
+  static serializeBinaryToWriter(message: ICEOffer, writer: jspb.BinaryWriter): void;
+  static deserializeBinary(bytes: Uint8Array): ICEOffer;
+  static deserializeBinaryFromReader(message: ICEOffer, reader: jspb.BinaryReader): ICEOffer;
+}
+
+export namespace ICEOffer {
+  export type AsObject = {
+    candidate: string,
+    senderid: string,
+    isremote: boolean,
+  }
+}
+
 export enum ICECredentialType { 
   NONE = 0,
   PASSWORD = 1,
