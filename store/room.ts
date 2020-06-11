@@ -349,7 +349,6 @@ export const actions: ActionTree<RoomState, RootState> = {
       }, 1000);
     });
     this.$p2pchat.onReceiveMessage.subscribe((c) => {
-      console.log('receive message from action', c);
       if (c.roomID === state.activeRoom?.id) {
         commit('receiveMessage', {
           id: c.id,

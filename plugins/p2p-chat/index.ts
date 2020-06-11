@@ -1,5 +1,6 @@
 import Vue from 'vue';
 import { Store } from 'vuex';
+import consola, { FancyReporter, LogLevel } from 'consola';
 import { Plugin } from '@nuxt/types';
 import { createInstance, INDEXEDDB, LOCALSTORAGE, WEBSQL } from 'localforage';
 import { ConversationManager } from './conversation-state';
@@ -17,9 +18,16 @@ const p2pChatPlugin: Plugin = async (ctx, inject) => {
   });
   const conversationManager = new ConversationManager();
   await conversationManager.init();
+  // setup logger
+  consola.level = LogLevel.Debug;
 
   // create p2p chat client
-  const client = new ChatClient(signaling, storage, conversationManager);
+  const client = new ChatClient(
+    signaling,
+    storage,
+    conversationManager,
+    consola
+  );
   ctx.$p2pchat = client;
   ctx.app.$p2pchat = client;
   Vue.prototype.$p2pchat = client;

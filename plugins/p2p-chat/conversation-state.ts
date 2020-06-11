@@ -85,6 +85,7 @@ export interface PendingConversationPayload {
 
 export interface IConversationStateManager {
   getPendingConversations(userID: string): Promise<ConversationState[]>;
+  removePendingConversation(id: string): Promise<void>;
   getConversations(
     roomID: string,
     limit: number,
@@ -202,6 +203,15 @@ export class ConversationManager implements IConversationStateManager {
       .orderBy(convTable.sendAt, Order.DESC)
       .exec();
     return results as ConversationState[];
+  }
+
+  async removePendingConversation(id: string): Promise<void> {
+    const pendingTable = this.db.getSchema().table('pendingConversation');
+    await this.db
+      .delete()
+      .from(pendingTable)
+      .where(pendingTable.conversationId.eq(id))
+      .exec();
   }
 
   async addPendingConversation(payload: PendingConversationPayload) {

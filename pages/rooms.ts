@@ -1,5 +1,5 @@
 import { company, random, internet, lorem, date } from 'faker';
-import { Component, Vue } from 'vue-property-decorator';
+import { Component, Vue, Watch } from 'vue-property-decorator';
 import { Mutation, State, Action } from 'vuex-class';
 import { AgoFilter } from '~/filters/ago';
 import { RootState } from '~/store';
@@ -33,6 +33,11 @@ export default class RoomsPage extends Vue {
   drawer = true;
   message: string = '';
 
+  @Watch('conversations')
+  onConversationsUpdated() {
+    this.$vuetify.goTo(document.body.scrollHeight);
+  }
+
   get couldSendMessage(): boolean {
     return !this.loadingConversation && !this.loadingRoom && !!this.activeRoom;
   }
@@ -61,7 +66,6 @@ export default class RoomsPage extends Vue {
 
   async reconnect() {
     await this.$p2pchat.reconnect();
-    this.subscribeConversationActivity();
   }
 
   async readConversation(conv: Conversation) {
