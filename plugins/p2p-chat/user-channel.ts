@@ -21,5 +21,10 @@ export class UserChannel {
   onReceiveMessage = this._onReceiveMessage.asObservable();
   onUserTyping = this._onUserTyping.asObservable();
 
-  constructor(public id: string, public name: string, public photo: string) {}
+  constructor(
+    public id: string,
+    public name: string,
+    public photo: string,
+    public online: boolean
+  ) {}
 }

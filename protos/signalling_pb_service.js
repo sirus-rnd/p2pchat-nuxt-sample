@@ -582,6 +582,15 @@ SignalingService.GetRoom = {
   responseType: signalling_pb.Room
 };
 
+SignalingService.GetUser = {
+  methodName: "GetUser",
+  service: SignalingService,
+  requestStream: false,
+  responseStream: false,
+  requestType: signalling_pb.GetUserParam,
+  responseType: signalling_pb.User
+};
+
 SignalingService.OfferSessionDescription = {
   methodName: "OfferSessionDescription",
   service: SignalingService,
@@ -634,6 +643,15 @@ SignalingService.SubscribeICECandidate = {
   responseStream: true,
   requestType: google_protobuf_empty_pb.Empty,
   responseType: signalling_pb.ICEOffer
+};
+
+SignalingService.SubscribeOnlineStatus = {
+  methodName: "SubscribeOnlineStatus",
+  service: SignalingService,
+  requestStream: true,
+  responseStream: true,
+  requestType: signalling_pb.Heartbeat,
+  responseType: signalling_pb.OnlineStatus
 };
 
 exports.SignalingService = SignalingService;
@@ -741,6 +759,37 @@ SignalingServiceClient.prototype.getRoom = function getRoom(requestMessage, meta
     callback = arguments[1];
   }
   var client = grpc.unary(SignalingService.GetRoom, {
+    request: requestMessage,
+    host: this.serviceHost,
+    metadata: metadata,
+    transport: this.options.transport,
+    debug: this.options.debug,
+    onEnd: function (response) {
+      if (callback) {
+        if (response.status !== grpc.Code.OK) {
+          var err = new Error(response.statusMessage);
+          err.code = response.status;
+          err.metadata = response.trailers;
+          callback(err, null);
+        } else {
+          callback(null, response.message);
+        }
+      }
+    }
+  });
+  return {
+    cancel: function () {
+      callback = null;
+      client.close();
+    }
+  };
+};
+
+SignalingServiceClient.prototype.getUser = function getUser(requestMessage, metadata, callback) {
+  if (arguments.length === 2) {
+    callback = arguments[1];
+  }
+  var client = grpc.unary(SignalingService.GetUser, {
     request: requestMessage,
     host: this.serviceHost,
     metadata: metadata,
@@ -969,6 +1018,51 @@ SignalingServiceClient.prototype.subscribeICECandidate = function subscribeICECa
     on: function (type, handler) {
       listeners[type].push(handler);
       return this;
+    },
+    cancel: function () {
+      listeners = null;
+      client.close();
+    }
+  };
+};
+
+SignalingServiceClient.prototype.subscribeOnlineStatus = function subscribeOnlineStatus(metadata) {
+  var listeners = {
+    data: [],
+    end: [],
+    status: []
+  };
+  var client = grpc.client(SignalingService.SubscribeOnlineStatus, {
+    host: this.serviceHost,
+    metadata: metadata,
+    transport: this.options.transport
+  });
+  client.onEnd(function (status, statusMessage, trailers) {
+    listeners.status.forEach(function (handler) {
+      handler({ code: status, details: statusMessage, metadata: trailers });
+    });
+    listeners.end.forEach(function (handler) {
+      handler({ code: status, details: statusMessage, metadata: trailers });
+    });
+    listeners = null;
+  });
+  client.onMessage(function (message) {
+    listeners.data.forEach(function (handler) {
+      handler(message);
+    })
+  });
+  client.start(metadata);
+  return {
+    on: function (type, handler) {
+      listeners[type].push(handler);
+      return this;
+    },
+    write: function (requestMessage) {
+      client.send(requestMessage);
+      return this;
+    },
+    end: function () {
+      client.finishSend();
     },
     cancel: function () {
       listeners = null;

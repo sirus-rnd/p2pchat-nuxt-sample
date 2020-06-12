@@ -57,6 +57,9 @@ export class User extends jspb.Message {
   getPhoto(): string;
   setPhoto(value: string): void;
 
+  getOnline(): boolean;
+  setOnline(value: boolean): void;
+
   serializeBinary(): Uint8Array;
   toObject(includeInstance?: boolean): User.AsObject;
   static toObject(includeInstance: boolean, msg: User): User.AsObject;
@@ -70,6 +73,47 @@ export namespace User {
     id: string,
     name: string,
     photo: string,
+    online: boolean,
+  }
+}
+
+export class OnlineStatus extends jspb.Message {
+  getId(): string;
+  setId(value: string): void;
+
+  getOnline(): boolean;
+  setOnline(value: boolean): void;
+
+  serializeBinary(): Uint8Array;
+  toObject(includeInstance?: boolean): OnlineStatus.AsObject;
+  static toObject(includeInstance: boolean, msg: OnlineStatus): OnlineStatus.AsObject;
+  static serializeBinaryToWriter(message: OnlineStatus, writer: jspb.BinaryWriter): void;
+  static deserializeBinary(bytes: Uint8Array): OnlineStatus;
+  static deserializeBinaryFromReader(message: OnlineStatus, reader: jspb.BinaryReader): OnlineStatus;
+}
+
+export namespace OnlineStatus {
+  export type AsObject = {
+    id: string,
+    online: boolean,
+  }
+}
+
+export class Heartbeat extends jspb.Message {
+  getBeat(): boolean;
+  setBeat(value: boolean): void;
+
+  serializeBinary(): Uint8Array;
+  toObject(includeInstance?: boolean): Heartbeat.AsObject;
+  static toObject(includeInstance: boolean, msg: Heartbeat): Heartbeat.AsObject;
+  static serializeBinaryToWriter(message: Heartbeat, writer: jspb.BinaryWriter): void;
+  static deserializeBinary(bytes: Uint8Array): Heartbeat;
+  static deserializeBinaryFromReader(message: Heartbeat, reader: jspb.BinaryReader): Heartbeat;
+}
+
+export namespace Heartbeat {
+  export type AsObject = {
+    beat: boolean,
   }
 }
 

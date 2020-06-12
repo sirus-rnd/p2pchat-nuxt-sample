@@ -15,10 +15,12 @@ import * as google_protobuf_timestamp_pb from 'google-protobuf/google/protobuf/t
 import {
   GetRoomParam,
   GetUserParam,
+  Heartbeat,
   ICEOffer,
   ICEParam,
   NewRoomParam,
   NewUserParam,
+  OnlineStatus,
   PaginationParam,
   Profile,
   Room,
@@ -445,6 +447,28 @@ export class SignalingServiceClient {
       request,
       metadata || {},
       this.methodInfoGetRoom,
+      callback);
+  }
+
+  methodInfoGetUser = new grpcWeb.AbstractClientBase.MethodInfo(
+    User,
+    (request: GetUserParam) => {
+      return request.serializeBinary();
+    },
+    User.deserializeBinary
+  );
+
+  getUser(
+    request: GetUserParam,
+    metadata: grpcWeb.Metadata | null,
+    callback: (err: grpcWeb.Error,
+               response: User) => void) {
+    return this.client_.rpcCall(
+      this.hostname_ +
+        '/protos.SignalingService/GetUser',
+      request,
+      metadata || {},
+      this.methodInfoGetUser,
       callback);
   }
 

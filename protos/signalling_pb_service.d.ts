@@ -175,6 +175,15 @@ type SignalingServiceGetRoom = {
   readonly responseType: typeof signalling_pb.Room;
 };
 
+type SignalingServiceGetUser = {
+  readonly methodName: string;
+  readonly service: typeof SignalingService;
+  readonly requestStream: false;
+  readonly responseStream: false;
+  readonly requestType: typeof signalling_pb.GetUserParam;
+  readonly responseType: typeof signalling_pb.User;
+};
+
 type SignalingServiceOfferSessionDescription = {
   readonly methodName: string;
   readonly service: typeof SignalingService;
@@ -229,18 +238,29 @@ type SignalingServiceSubscribeICECandidate = {
   readonly responseType: typeof signalling_pb.ICEOffer;
 };
 
+type SignalingServiceSubscribeOnlineStatus = {
+  readonly methodName: string;
+  readonly service: typeof SignalingService;
+  readonly requestStream: true;
+  readonly responseStream: true;
+  readonly requestType: typeof signalling_pb.Heartbeat;
+  readonly responseType: typeof signalling_pb.OnlineStatus;
+};
+
 export class SignalingService {
   static readonly serviceName: string;
   static readonly GetProfile: SignalingServiceGetProfile;
   static readonly UpdateProfile: SignalingServiceUpdateProfile;
   static readonly GetMyRooms: SignalingServiceGetMyRooms;
   static readonly GetRoom: SignalingServiceGetRoom;
+  static readonly GetUser: SignalingServiceGetUser;
   static readonly OfferSessionDescription: SignalingServiceOfferSessionDescription;
   static readonly AnswerSessionDescription: SignalingServiceAnswerSessionDescription;
   static readonly SubscribeSDPCommand: SignalingServiceSubscribeSDPCommand;
   static readonly SubscribeRoomEvent: SignalingServiceSubscribeRoomEvent;
   static readonly SendICECandidate: SignalingServiceSendICECandidate;
   static readonly SubscribeICECandidate: SignalingServiceSubscribeICECandidate;
+  static readonly SubscribeOnlineStatus: SignalingServiceSubscribeOnlineStatus;
 }
 
 export type ServiceError = { message: string, code: number; metadata: grpc.Metadata }
@@ -434,6 +454,15 @@ export class SignalingServiceClient {
     requestMessage: signalling_pb.GetRoomParam,
     callback: (error: ServiceError|null, responseMessage: signalling_pb.Room|null) => void
   ): UnaryResponse;
+  getUser(
+    requestMessage: signalling_pb.GetUserParam,
+    metadata: grpc.Metadata,
+    callback: (error: ServiceError|null, responseMessage: signalling_pb.User|null) => void
+  ): UnaryResponse;
+  getUser(
+    requestMessage: signalling_pb.GetUserParam,
+    callback: (error: ServiceError|null, responseMessage: signalling_pb.User|null) => void
+  ): UnaryResponse;
   offerSessionDescription(
     requestMessage: signalling_pb.SDPParam,
     metadata: grpc.Metadata,
@@ -464,5 +493,6 @@ export class SignalingServiceClient {
     callback: (error: ServiceError|null, responseMessage: google_protobuf_empty_pb.Empty|null) => void
   ): UnaryResponse;
   subscribeICECandidate(requestMessage: google_protobuf_empty_pb.Empty, metadata?: grpc.Metadata): ResponseStream<signalling_pb.ICEOffer>;
+  subscribeOnlineStatus(metadata?: grpc.Metadata): BidirectionalStream<signalling_pb.Heartbeat, signalling_pb.OnlineStatus>;
 }
 
