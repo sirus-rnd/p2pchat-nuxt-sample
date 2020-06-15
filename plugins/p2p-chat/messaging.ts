@@ -261,7 +261,7 @@ export class Messenger implements IMessenger {
 
   async send(channel: UserChannel, message: MessagingProtocol): Promise<void> {
     try {
-      if (!channel.connected || !channel.sendChannel) {
+      if (!channel.sendChannelReady || !channel.sendChannel) {
         throw new Error(`send channel ${channel.id} not connected`);
       }
       channel.sendChannel.send(JSON.stringify(message));
@@ -545,7 +545,7 @@ export class Messenger implements IMessenger {
         id: channel.id,
         name: channel.name,
         photo: channel.photo,
-        online: channel.connected
+        online: channel.sendChannelReady
       },
       roomID: payload.roomID
     });
@@ -572,7 +572,7 @@ export function mapChannelToUser(channel: UserChannel): User {
     id: channel.id,
     name: channel.name,
     photo: channel.photo,
-    online: channel.connected
+    online: channel.sendChannelReady
   };
 }
 

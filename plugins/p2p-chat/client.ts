@@ -222,11 +222,14 @@ export class ChatClient implements IChatClient {
     await this.initOnlineStatus();
 
     // make channels
-    this.makeChannels(this.rooms);
+    await this.makeChannels(this.rooms);
+    this.logger.debug('finish make channel');
+    this.logger.debug('list of channel', Object.keys(this.channels));
 
     // connect to each user on the rooms
     await Promise.all(
       Object.keys(this.channels).map((id) => {
+        this.logger.debug('is user online', id, this.channels[id]?.online);
         if (this.channels[id]?.online) {
           return this.channels[id].connect();
         }
@@ -300,6 +303,11 @@ export class ChatClient implements IChatClient {
     // handle receive message
     this.channels[id].onReceiveData.subscribe((event: MessageEvent) => {
       this.messenger.handleIncomingMessage(this.channels[id], event);
+    });
+
+    // resend pending messages
+    this.channels[id].onConnected.subscribe(() => {
+      this.messenger.resendPendingMessages(this.channels[id]);
     });
 
     // add each user connection event to central connection stream

@@ -62,20 +62,29 @@ export class UserChannel {
     this.sendChannel = this.localConnection.createDataChannel(uuid());
     this.localConnection.addEventListener(
       'icecandidate',
-      this.onLocalICECandidate
+      this.onLocalICECandidate.bind(this)
     );
     this.localConnection.addEventListener(
       'iceconnectionstatechange',
-      this.onLocalICEStateChange
+      this.onLocalICEStateChange.bind(this)
     );
     this.localConnection.addEventListener(
       'negotiationneeded',
-      this.onLocalNegotiationNeeded
+      this.onLocalNegotiationNeeded.bind(this)
     );
     // update connection status
-    this.sendChannel.addEventListener('error', this.onSendChannelError);
-    this.sendChannel.addEventListener('open', this.onSendChannelOpen);
-    this.sendChannel.addEventListener('close', this.onSendChannelClose);
+    this.sendChannel.addEventListener(
+      'error',
+      this.onSendChannelError.bind(this)
+    );
+    this.sendChannel.addEventListener(
+      'open',
+      this.onSendChannelOpen.bind(this)
+    );
+    this.sendChannel.addEventListener(
+      'close',
+      this.onSendChannelClose.bind(this)
+    );
   }
 
   async reconnect() {
@@ -89,15 +98,15 @@ export class UserChannel {
     });
     this.remoteConnection.addEventListener(
       'icecandidate',
-      this.onRemoteICECandidate
+      this.onRemoteICECandidate.bind(this)
     );
     this.remoteConnection.addEventListener(
       'iceconnectionstatechange',
-      this.onRemoteICEStateChange
+      this.onRemoteICEStateChange.bind(this)
     );
     this.remoteConnection.addEventListener(
       'datachannel',
-      this.onReceiveDataChannel
+      this.onReceiveDataChannel.bind(this)
     );
   }
 
@@ -105,12 +114,21 @@ export class UserChannel {
     this.logger.debug('receive data channel request', event.channel.id);
     this.receiveChannel = event.channel;
     // update connection status
-    this.receiveChannel.addEventListener('error', this.onReceiveChannelError);
-    this.receiveChannel.addEventListener('open', this.onReceiveChannelOpen);
-    this.receiveChannel.addEventListener('close', this.onReceiveChannelClose);
+    this.receiveChannel.addEventListener(
+      'error',
+      this.onReceiveChannelError.bind(this)
+    );
+    this.receiveChannel.addEventListener(
+      'open',
+      this.onReceiveChannelOpen.bind(this)
+    );
+    this.receiveChannel.addEventListener(
+      'close',
+      this.onReceiveChannelClose.bind(this)
+    );
     this.receiveChannel.addEventListener(
       'message',
-      this.onReceiveChannelGetMessage
+      this.onReceiveChannelGetMessage.bind(this)
     );
   }
 
@@ -365,15 +383,15 @@ export class UserChannel {
       // clean up some listeners
       this.remoteConnection.removeEventListener(
         'icecandidate',
-        this.onRemoteICECandidate
+        this.onRemoteICECandidate.bind(this)
       );
       this.remoteConnection.removeEventListener(
         'iceconnectionstatechange',
-        this.onRemoteICEStateChange
+        this.onRemoteICEStateChange.bind(this)
       );
       this.remoteConnection.removeEventListener(
         'datachannel',
-        this.onReceiveDataChannel
+        this.onReceiveDataChannel.bind(this)
       );
     }
     if (this.receiveChannel) {
@@ -393,19 +411,19 @@ export class UserChannel {
       // clean up some listeners
       this.receiveChannel.removeEventListener(
         'error',
-        this.onReceiveChannelError
+        this.onReceiveChannelError.bind(this)
       );
       this.receiveChannel.removeEventListener(
         'open',
-        this.onReceiveChannelOpen
+        this.onReceiveChannelOpen.bind(this)
       );
       this.receiveChannel.removeEventListener(
         'close',
-        this.onReceiveChannelClose
+        this.onReceiveChannelClose.bind(this)
       );
       this.receiveChannel.removeEventListener(
         'message',
-        this.onReceiveChannelGetMessage
+        this.onReceiveChannelGetMessage.bind(this)
       );
     }
   }
