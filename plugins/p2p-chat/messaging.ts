@@ -210,7 +210,7 @@ export class Messenger implements IMessenger {
     const results = await this.db
       .select()
       .from(msgTable)
-      .where(msgTable.roomID.eq(channelId))
+      .where(msgTable.channelId.eq(channelId))
       .exec();
     return results as PendingMessage[];
   }
@@ -278,6 +278,7 @@ export class Messenger implements IMessenger {
     this.logger.debug('number of pending message', messages?.length);
     await Promise.all(
       messages.map(async (msg) => {
+        this.logger.debug('resend pending message', msg.id);
         await this.send(channel, {
           type: msg.type,
           payload: msg.payload
@@ -330,6 +331,7 @@ export class Messenger implements IMessenger {
     channel: UserChannel,
     payload: NewMessagePayload
   ): Promise<void> {
+    this.logger.debug('send message', payload);
     await this.send(channel, {
       type: MessagingType.MessageNew,
       payload

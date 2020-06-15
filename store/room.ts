@@ -314,6 +314,7 @@ export const actions: ActionTree<RoomState, RootState> = {
         }
       } as SentConversation);
     } catch (err) {
+      console.error(err);
       commit('sendingMessageFailed', tempId);
     }
   },

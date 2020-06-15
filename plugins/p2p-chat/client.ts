@@ -4,7 +4,7 @@ import { ProtobufMessage } from '@improbable-eng/grpc-web/dist/typings/message';
 import { Observable, merge, Subject } from 'rxjs';
 import { v4 as uuid } from 'uuid';
 import { Consola } from 'consola';
-import { map, flatMap } from 'rxjs/operators';
+import { map } from 'rxjs/operators';
 import { Empty } from 'google-protobuf/google/protobuf/empty_pb';
 import { IConversationStateManager } from './conversation-state';
 import { IMessenger, FileInfo, mapConversationFromState } from './messaging';
@@ -14,7 +14,6 @@ import {
   Room,
   UserInRoomEventPayload,
   Conversation,
-  ConversationStatus,
   Message,
   MessageType,
   FileContent
@@ -140,7 +139,6 @@ export class ChatClient implements IChatClient {
     }
     await this.initSDPSignal();
     await this.initICEOfferSignal();
-    await this.initOnlineStatus();
 
     // reconn to each channels
     this.profile.online = false;
@@ -150,6 +148,7 @@ export class ChatClient implements IChatClient {
         this.connectToChannel(id);
       })
     );
+    await this.initOnlineStatus();
     // set profile to online
     this.profile.online = true;
   }
@@ -215,6 +214,8 @@ export class ChatClient implements IChatClient {
     await this.initSDPSignal();
     await this.initICEOfferSignal();
     this.makeChannels(this.rooms);
+
+    // initiate online status
     await this.initOnlineStatus();
 
     // connect to each user on the rooms
@@ -425,7 +426,11 @@ export class ChatClient implements IChatClient {
     // send message to all participants in room
     await Promise.all(
       participants.map((id) => {
+        this.logger.debug('send message to participants', id);
         if (id === this.profile.id) {
+          return;
+        }
+        if (!this.channels[id]) {
           return;
         }
         let file = null;
@@ -439,6 +444,7 @@ export class ChatClient implements IChatClient {
             type: info.type
           } as FileInfo;
         }
+        this.logger.debug('send message to', id);
         return this.messenger.sendMessage(this.channels[id], {
           id: convState.id,
           messageType: message.type,
@@ -475,11 +481,17 @@ export class ChatClient implements IChatClient {
     });
 
     await Promise.all(
-      participants.map((id) =>
-        this.messenger.readMessage(this.channels[id], {
+      participants.map((id) => {
+        if (!this.channels[id]) {
+          return;
+        }
+        if (id === this.profile.id) {
+          return;
+        }
+        return this.messenger.readMessage(this.channels[id], {
           id: conversationID
-        })
-      )
+        });
+      })
     );
     const convState = await this.conversationManager.getConversation(
       conversationID
@@ -500,11 +512,17 @@ export class ChatClient implements IChatClient {
     }
     const participants = room.getUsersList().map((user) => user.getId());
     await Promise.all(
-      participants.map((id) =>
-        this.messenger.typing(this.channels[id], {
+      participants.map((id) => {
+        if (!this.channels[id]) {
+          return;
+        }
+        if (id === this.profile.id) {
+          return;
+        }
+        return this.messenger.typing(this.channels[id], {
           roomID
-        })
-      )
+        });
+      })
     );
   }
 
@@ -761,45 +779,6 @@ export class ChatClient implements IChatClient {
       this.logger.debug('ice state change', ev);
     };
 
-    this.channels[id].localConnection.onnegotiationneeded = async () => {
-      // create SDP offers
-      const offer = await this.channels[id].localConnection.createOffer();
-      this.channels[id].localConnection.setLocalDescription(offer);
-      this.logger.debug('send offer', JSON.stringify(offer.sdp, null, 2));
-      const param = new SDPParam();
-      param.setUserid(id);
-      param.setDescription(offer.sdp);
-      const token = await this.getAccessToken();
-      await new Promise((resolve, reject) => {
-        this.signaling.offerSessionDescription(
-          param,
-          { token },
-          (err, response) => {
-            if (err) {
-              reject(err);
-            }
-            resolve(response);
-          }
-        );
-      });
-    };
-
-    // update connection status
-    this.channels[id].sendChannel.onerror = (err) => {
-      this.logger.error('send channel error', id, err);
-    };
-    this.channels[id].sendChannel.onopen = () => {
-      this.logger.debug('sen channel connected');
-      this.channels[id].connected = true;
-      this.channels[id]._onConnected.next(null);
-      // resend pending messages
-      this.messenger.resendPendingMessages(this.channels[id]);
-    };
-    this.channels[id].sendChannel.onclose = () => {
-      this.channels[id].connected = false;
-      this.channels[id]._onDisconnected.next(null);
-    };
-
     // setup receiving channel
     this.channels[id].remoteConnection = new RTCPeerConnection({
       iceServers: this.iceServers
@@ -832,6 +811,45 @@ export class ChatClient implements IChatClient {
       this.channels[id].receiveChannel.onerror = (err) => {
         this.logger.error('receive channel error', err);
       };
+    };
+
+    this.channels[id].localConnection.onnegotiationneeded = async () => {
+      // create SDP offers
+      const offer = await this.channels[id].localConnection.createOffer();
+      this.channels[id].localConnection.setLocalDescription(offer);
+      this.logger.debug('send offer', JSON.stringify(offer.sdp, null, 2));
+      const param = new SDPParam();
+      param.setUserid(id);
+      param.setDescription(offer.sdp);
+      const token = await this.getAccessToken();
+      await new Promise((resolve, reject) => {
+        this.signaling.offerSessionDescription(
+          param,
+          { token },
+          (err, response) => {
+            if (err) {
+              reject(err);
+            }
+            resolve(response);
+          }
+        );
+      });
+    };
+
+    // update connection status
+    this.channels[id].sendChannel.onerror = (err) => {
+      this.logger.error('send channel error', id, err);
+    };
+    this.channels[id].sendChannel.onopen = () => {
+      this.logger.debug('send channel connected');
+      this.channels[id].connected = true;
+      this.channels[id]._onConnected.next(null);
+      // resend pending messages
+      this.messenger.resendPendingMessages(this.channels[id]);
+    };
+    this.channels[id].sendChannel.onclose = () => {
+      this.channels[id].connected = false;
+      this.channels[id]._onDisconnected.next(null);
     };
   }
 

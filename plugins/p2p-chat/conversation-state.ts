@@ -1,3 +1,4 @@
+import { v4 as uuid } from 'uuid';
 import { schema, Type, Database, Order } from 'lovefield';
 import { MessageType } from './p2p-chat';
 
@@ -205,44 +206,6 @@ export class ConversationManager implements IConversationStateManager {
 
   private connect(): Promise<Database> {
     const builder = schema.create('conversation-state', 1);
-    builder
-      .createTable('conversations')
-      .addColumn('id', Type.STRING)
-      .addColumn('isReceiver', Type.BOOLEAN)
-      .addColumn('roomID', Type.STRING)
-      .addColumn('senderID', Type.STRING)
-      .addColumn('sendAt', Type.DATE_TIME)
-      .addColumn('messageType', Type.INTEGER)
-      .addColumn('messageText', Type.STRING)
-      .addForeignKey('fk_fileId', {
-        local: 'messageBinary',
-        ref: 'files.id'
-      })
-      .addColumn('receivers', Type.OBJECT)
-      .addColumn('read', Type.BOOLEAN)
-      .addColumn('readBy', Type.OBJECT)
-      .addColumn('receivedBy', Type.OBJECT)
-      .addColumn('errorCode', Type.NUMBER)
-      .addColumn('errorMessage', Type.STRING)
-      .addPrimaryKey(['id'])
-      .addIndex('idxSendAt', ['sendAt'], false, Order.DESC)
-      .addNullable([
-        'messageText',
-        'messageBinary',
-        'receivers',
-        'read',
-        'readBy',
-        'receivedBy',
-        'errorCode',
-        'errorMessage'
-      ]);
-
-    builder
-      .createTable('action')
-      .addColumn('time', Type.DATE_TIME)
-      .addColumn('type', Type.STRING)
-      .addColumn('payload', Type.OBJECT)
-      .addIndex('idxTime', ['time'], false, Order.DESC);
 
     builder
       .createTable('files')
@@ -257,6 +220,48 @@ export class ConversationManager implements IConversationStateManager {
       .addColumn('transferredTo', Type.OBJECT)
       .addPrimaryKey(['id'])
       .addNullable(['transferredTo', 'owner']);
+
+    builder
+      .createTable('conversations')
+      .addColumn('id', Type.STRING)
+      .addColumn('isReceiver', Type.BOOLEAN)
+      .addColumn('roomID', Type.STRING)
+      .addColumn('senderID', Type.STRING)
+      .addColumn('sendAt', Type.DATE_TIME)
+      .addColumn('messageType', Type.INTEGER)
+      .addColumn('messageText', Type.STRING)
+      .addColumn('messageBinary', Type.STRING)
+      .addColumn('receivers', Type.OBJECT)
+      .addColumn('read', Type.BOOLEAN)
+      .addColumn('readBy', Type.OBJECT)
+      .addColumn('receivedBy', Type.OBJECT)
+      .addColumn('errorCode', Type.NUMBER)
+      .addColumn('errorMessage', Type.STRING)
+      .addPrimaryKey(['id'])
+      .addForeignKey('fk_filesId', {
+        local: 'messageBinary',
+        ref: 'files.id'
+      })
+      .addIndex('idxSendAt', ['sendAt'], false, Order.DESC)
+      .addNullable([
+        'messageText',
+        'messageBinary',
+        'receivers',
+        'read',
+        'readBy',
+        'receivedBy',
+        'errorCode',
+        'errorMessage'
+      ]);
+
+    builder
+      .createTable('actions')
+      .addColumn('id', Type.STRING)
+      .addColumn('time', Type.DATE_TIME)
+      .addColumn('type', Type.STRING)
+      .addColumn('payload', Type.OBJECT)
+      .addPrimaryKey(['id'])
+      .addIndex('idxTime', ['time'], false, Order.DESC);
 
     // connect to database
     return builder.connect();
@@ -274,12 +279,13 @@ export class ConversationManager implements IConversationStateManager {
   ): Promise<ChatActionModel> {
     const actionTable = this.db.getSchema().table('actions');
     const row = actionTable.createRow({
+      id: uuid(),
       time: new Date(),
       type: action,
       payload
     });
     const results = await this.db
-      .insertOrReplace()
+      .insert()
       .into(actionTable)
       .values([row])
       .exec();
@@ -299,13 +305,17 @@ export class ConversationManager implements IConversationStateManager {
     const results = await this.db
       .select()
       .from(convTable)
-      .innerJoin(fileTable, fileTable.id.eq(convTable.messageBinary))
+      .leftOuterJoin(fileTable, fileTable.id.eq(convTable.messageBinary))
       .where(convTable.roomID.eq(roomID))
       .orderBy(convTable.sendAt, Order.DESC)
       .skip(skip)
       .limit(limit)
       .exec();
-    return results as ConversationState[];
+    return results.map((r: any) => {
+      const conv = r.conversations;
+      conv.messageBinary = r.files;
+      return conv;
+    });
   }
 
   async getConversation(id: string): Promise<ConversationState> {
@@ -313,12 +323,16 @@ export class ConversationManager implements IConversationStateManager {
     const fileTable = this.db.getSchema().table('files');
     const results = await this.db
       .select()
-      .innerJoin(fileTable, fileTable.id.eq(convTable.messageBinary))
+      .from(convTable)
+      .leftOuterJoin(fileTable, fileTable.id.eq(convTable.messageBinary))
       .where(convTable.id.eq(id))
       .limit(1)
       .exec();
     if (results.length > 0) {
-      return results[0] as ConversationState;
+      const r: any = results[0];
+      const conv = r.conversations;
+      conv.messageBinary = r.files;
+      return conv as ConversationState;
     }
     return null;
   }
@@ -424,7 +438,7 @@ export class ConversationManager implements IConversationStateManager {
     if (results.length > 0) {
       return results[0] as ConversationState;
     }
-    return null;
+    return this.getConversation(payload.id);
   }
 
   async messageReceived(
@@ -432,37 +446,31 @@ export class ConversationManager implements IConversationStateManager {
   ): Promise<ConversationState> {
     const convTable = this.db.getSchema().table('conversations');
     const convState = await this.getConversation(payload.id);
-    const receivedBy = convState.receivedBy || [];
-    receivedBy.push(payload.receivedBy);
-    const results = await this.db
+    convState.receivedBy = convState.receivedBy || [];
+    convState.receivedBy.push(payload.receivedBy);
+    await this.db
       .update(convTable)
-      .set(convTable.receivedBy, receivedBy)
+      .set(convTable.receivedBy, convState.receivedBy)
       .where(convTable.id.eq(payload.id))
       .exec();
     // commit message received action
     await this.commitAction(ChatAction.MessageReceived, payload);
-    if (results.length > 0) {
-      return results[0] as ConversationState;
-    }
-    return null;
+    return convState;
   }
 
   async messageRead(payload: MessageReadPayload): Promise<ConversationState> {
     const convTable = this.db.getSchema().table('conversations');
     const convState = await this.getConversation(payload.id);
-    const readBy = convState.readBy || [];
-    readBy.push(payload.readerID);
-    const results = await this.db
+    convState.readBy = convState.readBy || [];
+    convState.readBy.push(payload.readerID);
+    await this.db
       .update(convTable)
-      .set(convTable.readBy, readBy)
+      .set(convTable.readBy, convState.readBy)
       .where(convTable.id.eq(payload.id))
       .exec();
     // commit message read action
     await this.commitAction(ChatAction.MessageRead, payload);
-    if (results.length > 0) {
-      return results[0] as ConversationState;
-    }
-    return null;
+    return convState;
   }
 
   async getFile(id: string): Promise<FileState> {
@@ -507,19 +515,16 @@ export class ConversationManager implements IConversationStateManager {
   async fileTransferred(payload: TransferredFilePayload): Promise<FileState> {
     const fileTable = this.db.getSchema().table('files');
     const fileState = await this.getFile(payload.id);
-    const transferredTo = fileState.transferredTo || [];
-    transferredTo.push(payload.to);
-    const results = await this.db
+    fileState.transferredTo = fileState.transferredTo || [];
+    fileState.transferredTo.push(payload.to);
+    await this.db
       .update(fileTable)
-      .set(fileTable.transferredTo, transferredTo)
+      .set(fileTable.transferredTo, fileState.transferredTo)
       .where(fileTable.id.eq(payload.id))
       .exec();
     // commit file transferred action
     await this.commitAction(ChatAction.FileTransferred, payload);
-    if (results.length > 0) {
-      return results[0] as FileState;
-    }
-    return null;
+    return fileState;
   }
 
   async allFileChunkReceived(
@@ -529,20 +534,19 @@ export class ConversationManager implements IConversationStateManager {
     const fileState = await this.getFile(payload.id);
     const chunks = fileState.chunks.sort((a, b) => a.index - b.index);
     const blob = new Blob(chunks.map((c) => c.binary));
-    const binary = await blob.arrayBuffer();
-    const results = await this.db
+    fileState.binary = await blob.arrayBuffer();
+    fileState.chunks = [];
+    fileState.numberOfChunks = 0;
+    await this.db
       .update(fileTable)
-      .set(fileTable.binary, binary)
+      .set(fileTable.binary, fileState.binary)
       .set(fileTable.chunks, [])
       .set(fileTable.numberofChunks, 0)
       .where(fileTable.id.eq(payload.id))
       .exec();
     // commit file transferred action
     await this.commitAction(ChatAction.FileTransferDone, payload);
-    if (results.length > 0) {
-      return results[0] as FileState;
-    }
-    return null;
+    return fileState;
   }
 
   async receiveFile(payload: ReceiveFilePayload): Promise<FileState> {
@@ -589,17 +593,15 @@ export class ConversationManager implements IConversationStateManager {
       index: payload.chunkIndex,
       binary: payload.chunk
     });
-    const results = await this.db
+    fileState.chunks = chunks;
+    await this.db
       .update(fileTable)
       .set(fileTable.chunks, chunks)
       .where(fileTable.id.eq(payload.id))
       .exec();
     // commit file transferred action
     await this.commitAction(ChatAction.FileChunkReceived, payload);
-    if (results.length > 0) {
-      return results[0] as FileState;
-    }
-    return null;
+    return fileState;
   }
 
   async deleteFile(payload: DeletedFilePayload): Promise<FileState> {

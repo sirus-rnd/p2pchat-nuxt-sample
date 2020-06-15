@@ -5,6 +5,7 @@ import { Plugin } from '@nuxt/types';
 import { createInstance, INDEXEDDB, LOCALSTORAGE, WEBSQL } from 'localforage';
 import { ConversationManager } from './conversation-state';
 import { ChatClient } from './client';
+import { Messenger } from './messaging';
 import { SignalingServiceClient } from '~/protos/SignallingServiceClientPb';
 
 const p2pChatPlugin: Plugin = async (ctx, inject) => {
@@ -20,12 +21,16 @@ const p2pChatPlugin: Plugin = async (ctx, inject) => {
   await conversationManager.init();
   // setup logger
   consola.level = LogLevel.Debug;
+  // setup messenger
+  const messenger = new Messenger(conversationManager, consola);
+  await messenger.init();
 
   // create p2p chat client
   const client = new ChatClient(
     signaling,
     storage,
     conversationManager,
+    messenger,
     consola
   );
   ctx.$p2pchat = client;
