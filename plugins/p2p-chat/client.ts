@@ -28,10 +28,7 @@ import {
   RoomEvent,
   RoomEvents,
   SDP,
-  SDPTypes,
-  SDPParam,
   ICECredentialType,
-  ICEParam,
   ICEOffer,
   OnlineStatus,
   GetUserParam,
@@ -99,6 +96,14 @@ export class ChatClient implements IChatClient {
     return true;
   }
 
+  private getAccessToken(): Promise<string> {
+    return this.storage.getItem(ACCESS_KEY);
+  }
+
+  private async setAccessToken(token: string): Promise<void> {
+    await this.storage.setItem(ACCESS_KEY, token);
+  }
+
   async login(token: string): Promise<User> {
     // persist token
     await this.setAccessToken(token);
@@ -139,16 +144,17 @@ export class ChatClient implements IChatClient {
     }
     await this.initSDPSignal();
     await this.initICEOfferSignal();
+    await this.initOnlineStatus();
 
     // reconn to each channels
     this.profile.online = false;
     await Promise.all(
-      userIds.map(async (id) => {
-        await this.disconnectToChannel(id);
-        this.connectToChannel(id);
+      userIds.map((id) => {
+        if (this.channels[id]) {
+          return this.channels[id].reconnect();
+        }
       })
     );
-    await this.initOnlineStatus();
     // set profile to online
     this.profile.online = true;
   }
@@ -213,16 +219,16 @@ export class ChatClient implements IChatClient {
     // make channels & intiate SDP signaling
     await this.initSDPSignal();
     await this.initICEOfferSignal();
-    this.makeChannels(this.rooms);
-
-    // initiate online status
     await this.initOnlineStatus();
+
+    // make channels
+    this.makeChannels(this.rooms);
 
     // connect to each user on the rooms
     await Promise.all(
       Object.keys(this.channels).map((id) => {
-        if (this.channels[id].online) {
-          return this.connectToChannel(id);
+        if (this.channels[id]?.online) {
+          return this.channels[id].connect();
         }
       })
     );
@@ -253,7 +259,7 @@ export class ChatClient implements IChatClient {
     } as User;
   }
 
-  private makeChannels(rooms: Rooms) {
+  private async makeChannels(rooms: Rooms) {
     // get users id from each rooms
     const userIds: string[] = [];
     const users: PBUser[] = [];
@@ -272,9 +278,79 @@ export class ChatClient implements IChatClient {
     });
 
     // create channel & handle channel events for each users
+    const token = await this.getAccessToken();
     for (const user of users) {
-      this.setupUserChannel(user.toObject());
+      this.setupUserChannel(user.toObject(), token);
     }
+  }
+
+  private setupUserChannel(user: PBUser.AsObject, token: string) {
+    const id = user.id;
+    this.channels[id] = new UserChannel(
+      id,
+      user.name,
+      user.photo,
+      user.online,
+      this.logger,
+      token,
+      this.signaling,
+      this.iceServers
+    );
+
+    // handle receive message
+    this.channels[id].onReceiveData.subscribe((event: MessageEvent) => {
+      this.messenger.handleIncomingMessage(this.channels[id], event);
+    });
+
+    // add each user connection event to central connection stream
+    this.onUserConnected = merge(
+      this.onUserConnected,
+      this.channels[id].onConnected.pipe(map(() => id))
+    );
+    this.onUserDisconnected = merge(
+      this.onUserDisconnected,
+      this.channels[id].onDisconnected.pipe(map(() => id))
+    );
+
+    // hookup conversation state change
+    this.onMessageReceived = merge(
+      this.onMessageReceived,
+      this.channels[id].onMessageReceived
+    );
+    this.onMessageRead = merge(
+      this.onMessageRead,
+      this.channels[id].onMessageRead
+    );
+    this.onReceiveMessage = merge(
+      this.onReceiveMessage,
+      this.channels[id].onReceiveMessage
+    );
+
+    // hook up file transfer change
+    this.onFileTransferStart = merge(
+      this.onFileTransferStart,
+      this.channels[id].onFileTransferStart
+    );
+    this.onFileTransferEnd = merge(
+      this.onFileTransferEnd,
+      this.channels[id].onFileTransferEnd
+    );
+    this.onReceiveFileChunk = merge(
+      this.onReceiveFileChunk,
+      this.channels[id].onReceiveFileChunk
+    );
+
+    // user typing event stream
+    this.onUserTyping = merge(
+      this.onUserTyping,
+      this.channels[id].onUserTyping
+    );
+  }
+
+  private async destroyUserChannel(id: string) {
+    await this.channels[id].disconnectSendChannel();
+    await this.channels[id].disconnectReceivingChannel();
+    delete this.channels[id];
   }
 
   private getUserbyID(id: string): User {
@@ -285,12 +361,7 @@ export class ChatClient implements IChatClient {
       online: false
     };
     if (id === this.profile.id) {
-      user = {
-        id: this.profile.id,
-        name: this.profile.name,
-        photo: this.profile.photo,
-        online: true
-      };
+      user = this.profile;
     } else {
       const senderChannel = this.channels[id];
       if (senderChannel) {
@@ -298,7 +369,7 @@ export class ChatClient implements IChatClient {
           id: senderChannel.id,
           name: senderChannel.name,
           photo: senderChannel.photo,
-          online: senderChannel.connected
+          online: senderChannel.sendChannelReady
         };
       }
     }
@@ -309,8 +380,8 @@ export class ChatClient implements IChatClient {
     const userIds = Object.keys(this.channels);
     // disconnect from all channel
     await Promise.all(
-      userIds.map((id) => {
-        return this.disconnectToChannel(id);
+      userIds.map(async (id) => {
+        await this.channels[id].disconnectSendChannel();
       })
     );
     // close signaling channel
@@ -356,7 +427,7 @@ export class ChatClient implements IChatClient {
           participants: room.getUsersList().map((user) => {
             const id = user.getId();
             const online = this.channels[id]
-              ? this.channels[id].connected
+              ? this.channels[id].sendChannelReady
               : false;
             return {
               id,
@@ -534,75 +605,13 @@ export class ChatClient implements IChatClient {
     if (!this.channels[ownerID]) {
       throw new Error('file owner not found');
     }
-    if (!this.channels[ownerID].connected) {
+    if (!this.channels[ownerID].receiveChannelReady) {
       throw new Error('file owner offline');
     }
     await this.messenger.requestFile(this.channels[ownerID], {
       id: fileID,
       startAt: startIndex
     });
-  }
-
-  private getAccessToken(): Promise<string> {
-    return this.storage.getItem(ACCESS_KEY);
-  }
-
-  private async setAccessToken(token: string): Promise<void> {
-    await this.storage.setItem(ACCESS_KEY, token);
-  }
-
-  private setupUserChannel(user: PBUser.AsObject) {
-    const id = user.id;
-    this.channels[id] = new UserChannel(id, user.name, user.photo, user.online);
-
-    // add each user connection event to central connection stream
-    this.onUserConnected = merge(
-      this.onUserConnected,
-      this.channels[id].onConnected.pipe(map(() => id))
-    );
-    this.onUserDisconnected = merge(
-      this.onUserDisconnected,
-      this.channels[id].onDisconnected.pipe(map(() => id))
-    );
-
-    // hookup conversation state change
-    this.onMessageReceived = merge(
-      this.onMessageReceived,
-      this.channels[id].onMessageReceived
-    );
-    this.onMessageRead = merge(
-      this.onMessageRead,
-      this.channels[id].onMessageRead
-    );
-    this.onReceiveMessage = merge(
-      this.onReceiveMessage,
-      this.channels[id].onReceiveMessage
-    );
-
-    // hook up file transfer change
-    this.onFileTransferStart = merge(
-      this.onFileTransferStart,
-      this.channels[id].onFileTransferStart
-    );
-    this.onFileTransferEnd = merge(
-      this.onFileTransferEnd,
-      this.channels[id].onFileTransferEnd
-    );
-    this.onReceiveFileChunk = merge(
-      this.onReceiveFileChunk,
-      this.channels[id].onReceiveFileChunk
-    );
-
-    // user typing event stream
-    this.onUserTyping = merge(
-      this.onUserTyping,
-      this.channels[id].onUserTyping
-    );
-  }
-
-  private destroyUserChannel(id: string) {
-    this.disconnectToChannel(id);
-    delete this.channels[id];
   }
 
   private async initOnlineStatus() {
@@ -627,9 +636,9 @@ export class ChatClient implements IChatClient {
       // connect & disconnect based on online state
       try {
         if (payload.online) {
-          this.connectToChannel(id);
+          this.channels[id].connect();
         } else {
-          this.disconnectToChannel(id);
+          this.channels[id].disconnectSendChannel();
         }
       } catch (err) {
         this.logger.error(err);
@@ -661,20 +670,7 @@ export class ChatClient implements IChatClient {
       onMessage: (data: ICEOffer) => {
         const payload = data.toObject();
         const id = payload.senderid;
-        const candidate: RTCIceCandidate = JSON.parse(payload.candidate);
-        this.logger.debug('receive ICE candidate', candidate);
-        if (!this.channels[id]) {
-          return null;
-        }
-        try {
-          if (payload.isremote) {
-            this.channels[id].localConnection.addIceCandidate(candidate);
-          } else {
-            this.channels[id].remoteConnection.addIceCandidate(candidate);
-          }
-        } catch (err) {
-          this.logger.error(err);
-        }
+        this.channels[id].onICEOfferSignal(payload);
       },
       onEnd: (code: grpc.Code, msg: string | undefined, _: grpc.Metadata) => {
         if (code !== grpc.Code.OK) {
@@ -692,59 +688,10 @@ export class ChatClient implements IChatClient {
       request: new Empty(),
       host: this.signaling.hostname_,
       metadata: { token },
-      onMessage: async (data: SDP) => {
+      onMessage: (data: SDP) => {
         const payload = data.toObject();
         const id = payload.senderid;
-        switch (payload.type) {
-          case SDPTypes.OFFER: {
-            if (!this.channels[id]) {
-              return null;
-            }
-            const offer: RTCSessionDescriptionInit = {
-              type: 'offer',
-              sdp: payload.description
-            };
-            this.logger.debug('receive offer', payload);
-            this.channels[id].remoteConnection.setRemoteDescription(offer);
-
-            // create answer
-            const answer = await this.channels[
-              id
-            ].remoteConnection.createAnswer();
-            this.logger.debug('send answer', answer);
-            this.channels[id].remoteConnection.setLocalDescription(answer);
-            const param = new SDPParam();
-            param.setUserid(id);
-            param.setDescription(answer.sdp);
-            const token = await this.getAccessToken();
-            await new Promise((resolve, reject) => {
-              this.signaling.answerSessionDescription(
-                param,
-                { token },
-                (err, response) => {
-                  if (err) {
-                    reject(err);
-                  }
-                  resolve(response);
-                }
-              );
-            });
-            break;
-          }
-
-          case SDPTypes.ANSWER: {
-            if (!this.channels[id]) {
-              return null;
-            }
-            const answer: RTCSessionDescriptionInit = {
-              type: 'answer',
-              sdp: payload.description
-            };
-            this.logger.debug('receive answer', payload);
-            this.channels[id].localConnection.setRemoteDescription(answer);
-            break;
-          }
-        }
+        this.channels[id].onReceiveSDP(payload);
       },
       onEnd: (code: grpc.Code, msg: string | undefined, _: grpc.Metadata) => {
         if (code !== grpc.Code.OK) {
@@ -753,155 +700,6 @@ export class ChatClient implements IChatClient {
       },
       transport: grpc.WebsocketTransport()
     });
-  }
-
-  private connectToChannel(id: string) {
-    if (!this.isChannelExists(id)) {
-      throw new Error('channel not exists');
-    }
-    // create sending channel
-    this.channels[id].localConnection = new RTCPeerConnection({
-      iceServers: this.iceServers
-    });
-    this.channels[id].sendChannel = this.channels[
-      id
-    ].localConnection.createDataChannel(uuid());
-    this.channels[id].localConnection.onicecandidate = async (
-      event: RTCPeerConnectionIceEvent
-    ) => {
-      if (!event.candidate) {
-        return null;
-      }
-      await this.sendICECandidate(event.candidate, id, false);
-    };
-
-    this.channels[id].localConnection.oniceconnectionstatechange = (ev) => {
-      this.logger.debug('ice state change', ev);
-    };
-
-    // setup receiving channel
-    this.channels[id].remoteConnection = new RTCPeerConnection({
-      iceServers: this.iceServers
-    });
-    this.channels[id].remoteConnection.onicecandidate = async (
-      event: RTCPeerConnectionIceEvent
-    ) => {
-      if (!event.candidate) {
-        return null;
-      }
-      await this.sendICECandidate(event.candidate, id, true);
-    };
-
-    // when receiving channel established, handle incoming message
-    this.channels[id].remoteConnection.ondatachannel = (
-      ev: RTCDataChannelEvent
-    ) => {
-      this.logger.debug('receive data channel request', ev.channel.id);
-      this.channels[id].receiveChannel = ev.channel;
-      this.channels[id].receiveChannel.onopen = () => {
-        this.logger.debug('receive channel opened');
-      };
-      this.channels[id].receiveChannel.onclose = () => {
-        this.logger.debug('receive channel closed');
-      };
-      // parse message from receive channel
-      this.channels[id].receiveChannel.onmessage = (ev: MessageEvent) => {
-        this.messenger.handleIncomingMessage(this.channels[id], ev);
-      };
-      this.channels[id].receiveChannel.onerror = (err) => {
-        this.logger.error('receive channel error', err);
-      };
-    };
-
-    this.channels[id].localConnection.onnegotiationneeded = async () => {
-      // create SDP offers
-      const offer = await this.channels[id].localConnection.createOffer();
-      this.channels[id].localConnection.setLocalDescription(offer);
-      this.logger.debug('send offer', JSON.stringify(offer.sdp, null, 2));
-      const param = new SDPParam();
-      param.setUserid(id);
-      param.setDescription(offer.sdp);
-      const token = await this.getAccessToken();
-      await new Promise((resolve, reject) => {
-        this.signaling.offerSessionDescription(
-          param,
-          { token },
-          (err, response) => {
-            if (err) {
-              reject(err);
-            }
-            resolve(response);
-          }
-        );
-      });
-    };
-
-    // update connection status
-    this.channels[id].sendChannel.onerror = (err) => {
-      this.logger.error('send channel error', id, err);
-    };
-    this.channels[id].sendChannel.onopen = () => {
-      this.logger.debug('send channel connected');
-      this.channels[id].connected = true;
-      this.channels[id]._onConnected.next(null);
-      // resend pending messages
-      this.messenger.resendPendingMessages(this.channels[id]);
-    };
-    this.channels[id].sendChannel.onclose = () => {
-      this.channels[id].connected = false;
-      this.channels[id]._onDisconnected.next(null);
-    };
-  }
-
-  private async sendICECandidate(
-    iceCandidate: RTCIceCandidate,
-    id: string,
-    isRemote: boolean
-  ) {
-    this.logger.debug('ice candidate', iceCandidate, id, isRemote);
-    // send ICE candidate offer
-    const param = new ICEParam();
-    param.setUserid(id);
-    param.setIsremote(isRemote);
-    param.setCandidate(JSON.stringify(iceCandidate));
-    const token = await this.getAccessToken();
-    await new Promise((resolve, reject) => {
-      this.signaling.sendICECandidate(param, { token }, (err, response) => {
-        if (err) {
-          reject(err);
-        }
-        resolve(response);
-      });
-    });
-  }
-
-  private disconnectToChannel(id: string) {
-    if (!this.isChannelExists(id)) {
-      return null;
-    }
-    if (!this.channels[id].connected) {
-      return null;
-    }
-    if (this.channels[id].sendChannel) {
-      this.channels[id].sendChannel.close();
-    }
-    if (this.channels[id].localConnection) {
-      this.channels[id].localConnection.close();
-    }
-    if (!this.channels[id].remoteConnection) {
-      this.channels[id].remoteConnection.close();
-    }
-    if (this.channels[id].receiveChannel) {
-      this.channels[id].receiveChannel.close();
-    }
-  }
-
-  private isChannelExists(id: string): boolean {
-    const chan = this.channels[id];
-    if (!chan) {
-      return false;
-    }
-    return true;
   }
 
   async handleRoomEvents() {
@@ -965,9 +763,9 @@ export class ChatClient implements IChatClient {
                 });
               });
               const user = rawUser.toObject();
-              this.setupUserChannel(user);
+              this.setupUserChannel(user, token);
               if (user.online) {
-                this.connectToChannel(payload.participantid);
+                this.channels[user.id].connect();
               }
             }
 
