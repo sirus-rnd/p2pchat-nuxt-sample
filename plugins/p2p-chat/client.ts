@@ -6,17 +6,8 @@ import { v4 as uuid } from 'uuid';
 import { Consola } from 'consola';
 import { map, flatMap } from 'rxjs/operators';
 import { Empty } from 'google-protobuf/google/protobuf/empty_pb';
-import {
-  IConversationStateManager,
-  ConversationState
-} from './conversation-state';
-import {
-  MessagingType,
-  NewMessagePayload,
-  MessageReadPayload,
-  TypingPayload,
-  MessagingProtocol
-} from './messaging';
+import { IConversationStateManager } from './conversation-state';
+import { IMessenger, FileInfo, mapConversationFromState } from './messaging';
 import {
   IChatClient,
   User,
@@ -25,7 +16,8 @@ import {
   Conversation,
   ConversationStatus,
   Message,
-  MessageType
+  MessageType,
+  FileContent
 } from './p2p-chat';
 import { UserChannel } from './user-channel';
 import { SignalingService } from '~/protos/signalling_pb_service';
@@ -62,6 +54,9 @@ export class ChatClient implements IChatClient {
   onMessageRead: Observable<Conversation> = new Observable();
   onReceiveMessage: Observable<Conversation> = new Observable();
   onUserTyping: Observable<UserInRoomEventPayload> = new Observable();
+  onFileTransferStart: Observable<FileContent> = new Observable();
+  onReceiveFileChunk: Observable<FileContent> = new Observable();
+  onFileTransferEnd: Observable<FileContent> = new Observable();
   // signalling request handler
   private sdpCommandSub: grpc.Request;
   private iceOfferSub: grpc.Request;
@@ -93,6 +88,7 @@ export class ChatClient implements IChatClient {
     private signaling: SignalingServiceClient,
     private storage: LocalForage,
     private conversationManager: IConversationStateManager,
+    private messenger: IMessenger,
     private logger: Consola
   ) {}
 
@@ -287,14 +283,23 @@ export class ChatClient implements IChatClient {
       photo: null,
       online: false
     };
-    const senderChannel = this.channels[id];
-    if (senderChannel) {
+    if (id === this.profile.id) {
       user = {
-        id: senderChannel.id,
-        name: senderChannel.name,
-        photo: senderChannel.photo,
-        online: senderChannel.connected
+        id: this.profile.id,
+        name: this.profile.name,
+        photo: this.profile.photo,
+        online: true
       };
+    } else {
+      const senderChannel = this.channels[id];
+      if (senderChannel) {
+        user = {
+          id: senderChannel.id,
+          name: senderChannel.name,
+          photo: senderChannel.photo,
+          online: senderChannel.connected
+        };
+      }
     }
     return user;
   }
@@ -374,72 +379,9 @@ export class ChatClient implements IChatClient {
       skip
     );
 
-    return states.map((state) => this.mapConversationFromState(state));
-  }
-
-  private mapConversationFromState(state: ConversationState): Conversation {
-    // map user information from channel id
-    let sender: User = {
-      id: state.senderID,
-      name: state.senderID,
-      photo: null,
-      online: false
-    };
-    const senderChannel = this.channels[state.senderID];
-    if (senderChannel) {
-      sender = {
-        id: senderChannel.id,
-        name: senderChannel.name,
-        photo: senderChannel.photo,
-        online: senderChannel.connected
-      };
-    }
-
-    // set conversation status
-    let status: ConversationStatus;
-    if (!state.isReceiver) {
-      if (state.errorCode || state.errorMessage) {
-        status = ConversationStatus.FAILED;
-      } else if (state.receivedBy?.length > 0) {
-        status = ConversationStatus.RECEIVED;
-      } else if (state.readBy?.length > 0) {
-        status = ConversationStatus.READ;
-      } else {
-        status = ConversationStatus.SENT;
-      }
-    }
-    if (state.isReceiver) {
-      if (state.read) {
-        status = ConversationStatus.READ;
-      } else {
-        status = ConversationStatus.RECEIVED;
-      }
-    }
-
-    let content: string | ArrayBuffer = '';
-
-    switch (state.messageType) {
-      case MessageType.FILE:
-      case MessageType.IMAGE:
-        content = state.messageBinary;
-        break;
-      case MessageType.MESSAGE:
-        content = state.messageText;
-        break;
-    }
-
-    return {
-      id: state.id,
-      roomID: state.roomID,
-      isReceiver: state.isReceiver,
-      message: {
-        type: state.messageType,
-        content
-      },
-      sendAt: state.sendAt,
-      sender,
-      status
-    } as Conversation;
+    return states.map((state) =>
+      mapConversationFromState(this.getUserbyID(state.senderID), state)
+    );
   }
 
   async sendMessage(roomID: string, message: Message): Promise<Conversation> {
@@ -452,43 +394,66 @@ export class ChatClient implements IChatClient {
     }
     const participants = room.getUsersList().map((user) => user.getId());
 
-    // create new conversation
+    // when message are file, create file first
+    const isBinary =
+      message.type === MessageType.FILE || message.type === MessageType.IMAGE;
+    if (isBinary) {
+      const file = message.content as FileContent;
+      const fileState = await this.conversationManager.newFile({
+        id: uuid(),
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        binary: file.binary
+      });
+    }
+
+    // create new conversation state
+    let content = message.content as string;
+    if (isBinary) {
+      content = (message.content as FileContent)?.id;
+    }
     const convState = await this.conversationManager.sendMessage({
       id: uuid(),
       roomID,
       senderID: this.profile.id,
-      content: message.content,
+      content,
       type: message.type,
       participants
     });
 
+    // send message to all participants in room
     await Promise.all(
-      participants.map(async (id) => {
+      participants.map((id) => {
         if (id === this.profile.id) {
           return;
         }
-        const chan = this.channels[id];
-        if (!chan || !chan.connected) {
-          await this.conversationManager.addPendingConversation({
-            receiverId: id,
-            conversationId: convState.id
-          });
-          return null;
+        let file = null;
+        let messageContent = message.content as string;
+        if (isBinary) {
+          const info = message.content as FileContent;
+          messageContent = info.id;
+          file = {
+            name: info.id,
+            size: info.size,
+            type: info.type
+          } as FileInfo;
         }
-        return this.sendChannelMessage(id, {
-          type: MessagingType.MessageNew,
-          payload: {
-            id: convState.id,
-            roomID,
-            sendAt: convState.sendAt,
-            messageType: message.type,
-            messageContent: message.content
-          } as NewMessagePayload
+        return this.messenger.sendMessage(this.channels[id], {
+          id: convState.id,
+          messageType: message.type,
+          messageContent,
+          roomID,
+          sendAt: convState.sendAt,
+          file
         });
       })
     );
 
-    return this.mapConversationFromState(convState);
+    return mapConversationFromState(
+      this.getUserbyID(this.profile.id),
+      convState
+    );
   }
 
   async readMessage(
@@ -506,31 +471,23 @@ export class ChatClient implements IChatClient {
 
     // update read state
     await this.conversationManager.readMessage({
-      id: conversationID,
-      readerID: this.profile.id
+      id: conversationID
     });
 
     await Promise.all(
-      participants.map((id) => {
-        const chan = this.channels[id];
-        if (!chan || !chan.connected) {
-          this.logger.debug('channel not connected', id);
-          return null;
-        }
-        this.sendChannelMessage(id, {
-          type: MessagingType.MessageRead,
-          payload: {
-            id: conversationID,
-            readBy: this.profile.id
-          } as MessageReadPayload
-        });
-      })
+      participants.map((id) =>
+        this.messenger.readMessage(this.channels[id], {
+          id: conversationID
+        })
+      )
     );
-
     const convState = await this.conversationManager.getConversation(
       conversationID
     );
-    return this.mapConversationFromState(convState);
+    return mapConversationFromState(
+      this.getUserbyID(convState.senderID),
+      convState
+    );
   }
 
   async typing(roomID: string): Promise<void> {
@@ -542,22 +499,30 @@ export class ChatClient implements IChatClient {
       throw new Error('room not found!');
     }
     const participants = room.getUsersList().map((user) => user.getId());
-
     await Promise.all(
-      participants.map((id) => {
-        const chan = this.channels[id];
-        if (!chan || !chan.connected) {
-          return null;
-        }
-        this.sendChannelMessage(id, {
-          type: MessagingType.Typing,
-          payload: {
-            roomID,
-            userID: this.profile.id
-          } as TypingPayload
-        });
-      })
+      participants.map((id) =>
+        this.messenger.typing(this.channels[id], {
+          roomID
+        })
+      )
     );
+  }
+
+  async requestFile(
+    ownerID: string,
+    fileID: string,
+    startIndex: number
+  ): Promise<void> {
+    if (!this.channels[ownerID]) {
+      throw new Error('file owner not found');
+    }
+    if (!this.channels[ownerID].connected) {
+      throw new Error('file owner offline');
+    }
+    await this.messenger.requestFile(this.channels[ownerID], {
+      id: fileID,
+      startAt: startIndex
+    });
   }
 
   private getAccessToken(): Promise<string> {
@@ -594,6 +559,20 @@ export class ChatClient implements IChatClient {
     this.onReceiveMessage = merge(
       this.onReceiveMessage,
       this.channels[id].onReceiveMessage
+    );
+
+    // hook up file transfer change
+    this.onFileTransferStart = merge(
+      this.onFileTransferStart,
+      this.channels[id].onFileTransferStart
+    );
+    this.onFileTransferEnd = merge(
+      this.onFileTransferEnd,
+      this.channels[id].onFileTransferEnd
+    );
+    this.onReceiveFileChunk = merge(
+      this.onReceiveFileChunk,
+      this.channels[id].onReceiveFileChunk
     );
 
     // user typing event stream
@@ -813,8 +792,8 @@ export class ChatClient implements IChatClient {
       this.logger.debug('sen channel connected');
       this.channels[id].connected = true;
       this.channels[id]._onConnected.next(null);
-      // resend pending conversations
-      this.resendPendingConversation(id);
+      // resend pending messages
+      this.messenger.resendPendingMessages(this.channels[id]);
     };
     this.channels[id].sendChannel.onclose = () => {
       this.channels[id].connected = false;
@@ -848,8 +827,7 @@ export class ChatClient implements IChatClient {
       };
       // parse message from receive channel
       this.channels[id].receiveChannel.onmessage = (ev: MessageEvent) => {
-        this.logger.debug('receive message', ev.data);
-        this.handleIncomingMessage(id, ev);
+        this.messenger.handleIncomingMessage(this.channels[id], ev);
       };
       this.channels[id].receiveChannel.onerror = (err) => {
         this.logger.error('receive channel error', err);
@@ -879,93 +857,6 @@ export class ChatClient implements IChatClient {
     });
   }
 
-  private async handleIncomingMessage(id: string, ev: MessageEvent) {
-    const msg: MessagingProtocol = JSON.parse(ev.data);
-    switch (msg.type) {
-      case MessagingType.MessageNew: {
-        const payload = msg.payload as NewMessagePayload;
-        this.logger.debug('receive message payload', payload);
-        const conv = await this.conversationManager.receiveMessage({
-          id: payload.id,
-          roomID: payload.roomID,
-          senderID: id,
-          content: payload.messageContent,
-          type: payload.messageType,
-          sentAt: new Date(payload.sendAt)
-        });
-        this.logger.debug('receive message from conv', conv);
-        this.channels[id]._onReceiveMessage.next(
-          this.mapConversationFromState(conv)
-        );
-        break;
-      }
-      case MessagingType.MessageRead: {
-        const payload = msg.payload as MessageReadPayload;
-        const conv = await this.conversationManager.messageRead({
-          id: payload.id,
-          readerID: id
-        });
-        this.channels[id]._onMessageRead.next(
-          this.mapConversationFromState(conv)
-        );
-        break;
-      }
-      case MessagingType.MessageReceived: {
-        const payload = msg.payload as MessageReadPayload;
-        const conv = await this.conversationManager.messageReceived({
-          id: payload.id,
-          receivedBy: id
-        });
-        this.channels[id]._onMessageReceived.next(
-          this.mapConversationFromState(conv)
-        );
-        break;
-      }
-      case MessagingType.Typing: {
-        const payload = msg.payload as TypingPayload;
-        this.channels[id]._onUserTyping.next({
-          roomID: payload.roomID,
-          user: this.getUserbyID(id)
-        });
-        break;
-      }
-    }
-  }
-
-  private async resendPendingConversation(userID: string) {
-    const convs = await this.conversationManager.getPendingConversations(
-      userID
-    );
-    Promise.all(
-      convs.map((conv) => {
-        let messageContent;
-        switch (conv.messageType) {
-          case MessageType.FILE:
-          case MessageType.IMAGE:
-            messageContent = conv.messageBinary;
-            break;
-          case MessageType.MESSAGE:
-            messageContent = conv.messageText;
-        }
-        try {
-          this.sendChannelMessage(userID, {
-            type: MessagingType.MessageNew,
-            payload: {
-              id: conv.id,
-              roomID: conv.roomID,
-              sendAt: conv.sendAt,
-              messageType: conv.messageType,
-              messageContent
-            } as NewMessagePayload
-          });
-          this.conversationManager.removePendingConversation(conv.id);
-        } catch (err) {
-          this.logger.error(err);
-        }
-      })
-    );
-  }
-
   private disconnectToChannel(id: string) {
     if (!this.isChannelExists(id)) {
       return null;
@@ -985,18 +876,6 @@ export class ChatClient implements IChatClient {
     if (this.channels[id].receiveChannel) {
       this.channels[id].receiveChannel.close();
     }
-  }
-
-  private sendChannelMessage(id: string, message: MessagingProtocol) {
-    if (!this.isChannelExists(id)) {
-      throw new Error('channel not exists');
-    }
-    // send message through send channel
-    if (!this.channels[id]?.sendChannel || !this.channels[id].connected) {
-      throw new Error(`user ${id} offline`);
-    }
-    this.logger.debug('send message', message);
-    this.channels[id].sendChannel.send(JSON.stringify(message));
   }
 
   private isChannelExists(id: string): boolean {

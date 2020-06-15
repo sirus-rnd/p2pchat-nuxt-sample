@@ -27,7 +27,16 @@ export interface Conversation {
 
 export interface Message {
   type: MessageType;
-  content: string | ArrayBuffer;
+  content?: string | FileContent;
+}
+
+export interface FileContent {
+  id: string;
+  name: string;
+  binary?: ArrayBuffer;
+  size: number;
+  type: string;
+  downloaded: number;
 }
 
 export enum ConversationStatus {
@@ -64,6 +73,11 @@ export interface IChatClient {
   ): Promise<Conversation[]>;
   sendMessage(roomID: string, message: Message): Promise<Conversation>;
   readMessage(roomID: string, messageID: string): Promise<Conversation>;
+  requestFile(
+    ownerID: string,
+    fileID: string,
+    startIndex: number
+  ): Promise<void>;
   typing(roomID: string): Promise<void>;
   onUserConnected: Observable<string>; // user id
   onUserDisconnected: Observable<string>; // user id
@@ -78,4 +92,7 @@ export interface IChatClient {
   onUserLeftRoom: Observable<UserInRoomEventPayload>;
   onUserProfileUpdated: Observable<User>;
   onUserRemoved: Observable<User>;
+  onFileTransferStart: Observable<FileContent>;
+  onReceiveFileChunk: Observable<FileContent>;
+  onFileTransferEnd: Observable<FileContent>;
 }

@@ -7,13 +7,35 @@ export enum ChatAction {
   MessageFailedToSend = 'failed-to-send',
   ReceiveMessage = 'receive',
   MessageReceived = 'received',
-  MessageRead = 'read'
+  MessageRead = 'read', // our message read
+  ReadMessage = 'read-message', // read others message
+  NewFile = 'file:new',
+  FileReceived = 'file:received',
+  FileChunkReceived = 'file:chunk-received',
+  FileTransferred = 'file:transferred',
+  FileTransferDone = 'file:transfer-done',
+  FileDeleted = 'file:deleted'
 }
+
+export type ChatActionPayload =
+  | MessageSendPayload
+  | MessageSentPayload
+  | MessageFailedToSendPayload
+  | ReceiveMessagePayload
+  | MessageReceivedPayload
+  | MessageReadPayload
+  | ReadMessagePayload
+  | NewFilePayload
+  | ReceiveFilePayload
+  | ReceiveFileChunkPayload
+  | TransferredFilePayload
+  | DeletedFilePayload
+  | FileChunkTransferFinishedPayload;
 
 export interface ChatActionModel {
   time: Date;
   type: ChatAction;
-  payload: any;
+  payload: ChatActionPayload;
 }
 
 export interface MessageSendPayload {
@@ -21,7 +43,7 @@ export interface MessageSendPayload {
   roomID: string;
   senderID: string;
   type: MessageType;
-  content: string | ArrayBuffer;
+  content: string;
   participants: string[];
 }
 
@@ -42,7 +64,7 @@ export interface ReceiveMessagePayload {
   senderID: string;
   type: MessageType;
   sentAt: Date;
-  content: string | ArrayBuffer;
+  content: string;
 }
 
 export interface MessageReceivedPayload {
@@ -55,6 +77,46 @@ export interface MessageReadPayload {
   readerID: string;
 }
 
+export interface ReadMessagePayload {
+  id: string;
+}
+
+export interface NewFilePayload {
+  id: string;
+  name: string;
+  binary: ArrayBuffer;
+  size: number;
+  type: string;
+}
+
+export interface ReceiveFilePayload {
+  id: string;
+  owner: string;
+  name: string;
+  size: number;
+  type: string;
+  numberOfChunks: number;
+}
+
+export interface ReceiveFileChunkPayload {
+  id: string;
+  chunkIndex: number;
+  chunk: ArrayBuffer;
+}
+
+export interface TransferredFilePayload {
+  id: string;
+  to: string;
+}
+
+export interface DeletedFilePayload {
+  id: string;
+}
+
+export interface FileChunkTransferFinishedPayload {
+  id: string;
+}
+
 export interface ConversationState {
   id: string;
   isReceiver: boolean;
@@ -63,7 +125,7 @@ export interface ConversationState {
   sendAt: Date;
   messageType: MessageType;
   messageText?: string;
-  messageBinary?: ArrayBuffer;
+  messageBinary?: FileState;
   receivers?: string[];
   read?: boolean;
   readBy?: string[];
@@ -72,20 +134,27 @@ export interface ConversationState {
   errorMessage?: string;
 }
 
-export interface PendingConversation {
+export interface FileState {
   id: string;
-  conversationId: string;
-  receiverId: string;
+  name: string;
+  binary: ArrayBuffer;
+  size: number;
+  type: string;
+  createdAt: Date;
+  isOwner: boolean;
+  owner?: string;
+  numberOfChunks?: number;
+  chunks?: FileChunk[];
+  transferredTo?: string[];
 }
 
-export interface PendingConversationPayload {
-  conversationId: string;
-  receiverId: string;
+export interface FileChunk {
+  index: number;
+  binary: ArrayBuffer;
 }
 
 export interface IConversationStateManager {
-  getPendingConversations(userID: string): Promise<ConversationState[]>;
-  removePendingConversation(id: string): Promise<void>;
+  reset(): Promise<void>;
   getConversations(
     roomID: string,
     limit: number,
@@ -93,13 +162,20 @@ export interface IConversationStateManager {
   ): Promise<ConversationState[]>;
   getConversation(id: string): Promise<ConversationState>;
   sendMessage(payload: MessageSendPayload): Promise<ConversationState>;
-  addPendingConversation(payload: PendingConversationPayload): Promise<void>;
   failedToSend(payload: MessageFailedToSendPayload): Promise<ConversationState>;
   receiveMessage(payload: ReceiveMessagePayload): Promise<ConversationState>;
-  readMessage(payload: MessageReadPayload): Promise<ConversationState>;
+  readMessage(payload: ReadMessagePayload): Promise<ConversationState>;
   messageReceived(payload: MessageReceivedPayload): Promise<ConversationState>;
   messageRead(payload: MessageReadPayload): Promise<ConversationState>;
-  reset(): Promise<void>;
+  getFile(id: string): Promise<FileState>;
+  newFile(payload: NewFilePayload): Promise<FileState>;
+  fileTransferred(payload: TransferredFilePayload): Promise<FileState>;
+  receiveFile(payload: ReceiveFilePayload): Promise<FileState>;
+  receiveFileChunk(payload: ReceiveFileChunkPayload): Promise<FileState>;
+  allFileChunkReceived(
+    payload: FileChunkTransferFinishedPayload
+  ): Promise<FileState>;
+  deleteFile(payload: DeletedFilePayload): Promise<FileState>;
 }
 
 export class ConversationManager implements IConversationStateManager {
@@ -110,12 +186,12 @@ export class ConversationManager implements IConversationStateManager {
   }
 
   async reset(): Promise<void> {
-    const pendingTable = this.db.getSchema().table('pendingConversation');
+    const actionTable = this.db.getSchema().table('actions');
+    const fileTable = this.db.getSchema().table('files');
     const convTable = this.db.getSchema().table('conversations');
-    const actionTable = this.db.getSchema().table('action');
     await this.db
       .delete()
-      .from(pendingTable)
+      .from(actionTable)
       .exec();
     await this.db
       .delete()
@@ -123,12 +199,12 @@ export class ConversationManager implements IConversationStateManager {
       .exec();
     await this.db
       .delete()
-      .from(actionTable)
+      .from(fileTable)
       .exec();
   }
 
   private connect(): Promise<Database> {
-    const builder = schema.create('chat', 1);
+    const builder = schema.create('conversation-state', 1);
     builder
       .createTable('conversations')
       .addColumn('id', Type.STRING)
@@ -138,7 +214,10 @@ export class ConversationManager implements IConversationStateManager {
       .addColumn('sendAt', Type.DATE_TIME)
       .addColumn('messageType', Type.INTEGER)
       .addColumn('messageText', Type.STRING)
-      .addColumn('messageBinary', Type.ARRAY_BUFFER)
+      .addForeignKey('fk_fileId', {
+        local: 'messageBinary',
+        ref: 'files.id'
+      })
       .addColumn('receivers', Type.OBJECT)
       .addColumn('read', Type.BOOLEAN)
       .addColumn('readBy', Type.OBJECT)
@@ -166,11 +245,18 @@ export class ConversationManager implements IConversationStateManager {
       .addIndex('idxTime', ['time'], false, Order.DESC);
 
     builder
-      .createTable('pendingConversation')
+      .createTable('files')
       .addColumn('id', Type.STRING)
-      .addColumn('conversationId', Type.STRING)
-      .addColumn('receiverId', Type.STRING)
-      .addPrimaryKey(['id']);
+      .addColumn('name', Type.STRING)
+      .addColumn('binary', Type.ARRAY_BUFFER)
+      .addColumn('size', Type.NUMBER)
+      .addColumn('type', Type.STRING)
+      .addColumn('createdAt', Type.DATE_TIME)
+      .addColumn('isOwner', Type.BOOLEAN)
+      .addColumn('owner', Type.STRING)
+      .addColumn('transferredTo', Type.OBJECT)
+      .addPrimaryKey(['id'])
+      .addNullable(['transferredTo', 'owner']);
 
     // connect to database
     return builder.connect();
@@ -182,50 +268,24 @@ export class ConversationManager implements IConversationStateManager {
     }
   }
 
-  async getPendingConversations(userID: string): Promise<ConversationState[]> {
-    const pendingTable = this.db.getSchema().table('pendingConversation');
-    const pendings = await this.db
-      .select()
-      .from(pendingTable)
-      .where(pendingTable.receiverId.eq(userID))
-      .exec();
-
-    const pendingIds = pendings.map(
-      (pending: PendingConversation) => pending.conversationId
-    );
-
-    // get all conversation
-    const convTable = this.db.getSchema().table('conversations');
+  private async commitAction(
+    action: ChatAction,
+    payload: ChatActionPayload
+  ): Promise<ChatActionModel> {
+    const actionTable = this.db.getSchema().table('actions');
+    const row = actionTable.createRow({
+      time: new Date(),
+      type: action,
+      payload
+    });
     const results = await this.db
-      .select()
-      .from(convTable)
-      .where(convTable.id.in(pendingIds))
-      .orderBy(convTable.sendAt, Order.DESC)
-      .exec();
-    return results as ConversationState[];
-  }
-
-  async removePendingConversation(id: string): Promise<void> {
-    const pendingTable = this.db.getSchema().table('pendingConversation');
-    await this.db
-      .delete()
-      .from(pendingTable)
-      .where(pendingTable.conversationId.eq(id))
-      .exec();
-  }
-
-  async addPendingConversation(payload: PendingConversationPayload) {
-    const pendingTable = this.db.getSchema().table('pendingConversation');
-    const row = pendingTable.createRow({
-      id: `${payload.conversationId}-${payload.receiverId}`,
-      receiverId: payload.receiverId,
-      conversationId: payload.conversationId
-    } as PendingConversation);
-    await this.db
       .insertOrReplace()
-      .into(pendingTable)
+      .into(actionTable)
       .values([row])
       .exec();
+    if (results.length > 0) {
+      return results[0] as ChatActionModel;
+    }
     return null;
   }
 
@@ -235,9 +295,11 @@ export class ConversationManager implements IConversationStateManager {
     skip: number
   ): Promise<ConversationState[]> {
     const convTable = this.db.getSchema().table('conversations');
+    const fileTable = this.db.getSchema().table('files');
     const results = await this.db
       .select()
       .from(convTable)
+      .innerJoin(fileTable, fileTable.id.eq(convTable.messageBinary))
       .where(convTable.roomID.eq(roomID))
       .orderBy(convTable.sendAt, Order.DESC)
       .skip(skip)
@@ -248,8 +310,10 @@ export class ConversationManager implements IConversationStateManager {
 
   async getConversation(id: string): Promise<ConversationState> {
     const convTable = this.db.getSchema().table('conversations');
+    const fileTable = this.db.getSchema().table('files');
     const results = await this.db
       .select()
+      .innerJoin(fileTable, fileTable.id.eq(convTable.messageBinary))
       .where(convTable.id.eq(id))
       .limit(1)
       .exec();
@@ -268,17 +332,19 @@ export class ConversationManager implements IConversationStateManager {
       senderID: payload.senderID,
       sendAt: new Date(),
       messageType: payload.type,
+      messageBinary: null,
+      messageText: null,
       receivers: payload.participants,
       receivedBy: [],
       readBy: []
-    } as ConversationState;
+    };
     switch (payload.type) {
       case MessageType.FILE:
       case MessageType.IMAGE:
-        convState.messageBinary = payload.content as ArrayBuffer;
+        convState.messageBinary = payload.content;
         break;
       case MessageType.MESSAGE:
-        convState.messageText = payload.content as string;
+        convState.messageText = payload.content;
     }
     const row = convTable.createRow(convState);
     const results = await this.db
@@ -286,6 +352,8 @@ export class ConversationManager implements IConversationStateManager {
       .into(convTable)
       .values([row])
       .exec();
+    // commit send message action
+    await this.commitAction(ChatAction.SendMessage, payload);
     if (results.length > 0) {
       return results[0] as ConversationState;
     }
@@ -318,15 +386,17 @@ export class ConversationManager implements IConversationStateManager {
       roomID: payload.roomID,
       senderID: payload.senderID,
       sendAt: payload.sentAt,
-      messageType: payload.type
-    } as ConversationState;
+      messageType: payload.type,
+      messageBinary: null,
+      messageText: null
+    };
     switch (payload.type) {
       case MessageType.FILE:
       case MessageType.IMAGE:
-        convState.messageBinary = payload.content as ArrayBuffer;
+        convState.messageBinary = payload.content;
         break;
       case MessageType.MESSAGE:
-        convState.messageText = payload.content as string;
+        convState.messageText = payload.content;
     }
     const row = convTable.createRow(convState);
     const results = await this.db
@@ -334,19 +404,23 @@ export class ConversationManager implements IConversationStateManager {
       .into(convTable)
       .values([row])
       .exec();
+    // commit receive message action
+    await this.commitAction(ChatAction.ReceiveMessage, payload);
     if (results.length > 0) {
       return results[0] as ConversationState;
     }
     return null;
   }
 
-  async readMessage(payload: MessageReadPayload): Promise<ConversationState> {
+  async readMessage(payload: ReadMessagePayload): Promise<ConversationState> {
     const convTable = this.db.getSchema().table('conversations');
     const results = await this.db
       .update(convTable)
       .set(convTable.read, true)
       .where(convTable.id.eq(payload.id))
       .exec();
+    // commit read message action
+    await this.commitAction(ChatAction.ReadMessage, payload);
     if (results.length > 0) {
       return results[0] as ConversationState;
     }
@@ -365,6 +439,8 @@ export class ConversationManager implements IConversationStateManager {
       .set(convTable.receivedBy, receivedBy)
       .where(convTable.id.eq(payload.id))
       .exec();
+    // commit message received action
+    await this.commitAction(ChatAction.MessageReceived, payload);
     if (results.length > 0) {
       return results[0] as ConversationState;
     }
@@ -381,8 +457,159 @@ export class ConversationManager implements IConversationStateManager {
       .set(convTable.readBy, readBy)
       .where(convTable.id.eq(payload.id))
       .exec();
+    // commit message read action
+    await this.commitAction(ChatAction.MessageRead, payload);
     if (results.length > 0) {
       return results[0] as ConversationState;
+    }
+    return null;
+  }
+
+  async getFile(id: string): Promise<FileState> {
+    const fileTable = this.db.getSchema().table('files');
+    const results = await this.db
+      .select()
+      .where(fileTable.id.eq(id))
+      .limit(1)
+      .exec();
+    if (results.length > 0) {
+      return results[0] as FileState;
+    }
+    return null;
+  }
+
+  async newFile(payload: NewFilePayload): Promise<FileState> {
+    const fileTable = this.db.getSchema().table('files');
+    const fileState = {
+      id: payload.id,
+      name: payload.name,
+      binary: payload.binary,
+      size: payload.size,
+      type: payload.type,
+      createdAt: new Date(),
+      isOwner: true,
+      transferredTo: []
+    } as FileState;
+    const row = fileTable.createRow(fileState);
+    const results = await this.db
+      .insertOrReplace()
+      .into(fileTable)
+      .values([row])
+      .exec();
+    // commit new file action
+    await this.commitAction(ChatAction.NewFile, payload);
+    if (results.length > 0) {
+      return results[0] as FileState;
+    }
+    return null;
+  }
+
+  async fileTransferred(payload: TransferredFilePayload): Promise<FileState> {
+    const fileTable = this.db.getSchema().table('files');
+    const fileState = await this.getFile(payload.id);
+    const transferredTo = fileState.transferredTo || [];
+    transferredTo.push(payload.to);
+    const results = await this.db
+      .update(fileTable)
+      .set(fileTable.transferredTo, transferredTo)
+      .where(fileTable.id.eq(payload.id))
+      .exec();
+    // commit file transferred action
+    await this.commitAction(ChatAction.FileTransferred, payload);
+    if (results.length > 0) {
+      return results[0] as FileState;
+    }
+    return null;
+  }
+
+  async allFileChunkReceived(
+    payload: FileChunkTransferFinishedPayload
+  ): Promise<FileState> {
+    const fileTable = this.db.getSchema().table('files');
+    const fileState = await this.getFile(payload.id);
+    const chunks = fileState.chunks.sort((a, b) => a.index - b.index);
+    const blob = new Blob(chunks.map((c) => c.binary));
+    const binary = await blob.arrayBuffer();
+    const results = await this.db
+      .update(fileTable)
+      .set(fileTable.binary, binary)
+      .set(fileTable.chunks, [])
+      .set(fileTable.numberofChunks, 0)
+      .where(fileTable.id.eq(payload.id))
+      .exec();
+    // commit file transferred action
+    await this.commitAction(ChatAction.FileTransferDone, payload);
+    if (results.length > 0) {
+      return results[0] as FileState;
+    }
+    return null;
+  }
+
+  async receiveFile(payload: ReceiveFilePayload): Promise<FileState> {
+    const fileTable = this.db.getSchema().table('files');
+    const fileState = {
+      id: payload.id,
+      name: payload.name,
+      binary: null,
+      size: payload.size,
+      type: payload.type,
+      createdAt: new Date(),
+      isOwner: false,
+      owner: payload.owner,
+      chunks: [],
+      numberOfChunks: payload.numberOfChunks
+    } as FileState;
+    const row = fileTable.createRow(fileState);
+    const results = await this.db
+      .insertOrReplace()
+      .into(fileTable)
+      .values([row])
+      .exec();
+    // commit new file action
+    await this.commitAction(ChatAction.FileReceived, payload);
+    if (results.length > 0) {
+      return results[0] as FileState;
+    }
+    return null;
+  }
+
+  async receiveFileChunk(payload: ReceiveFileChunkPayload): Promise<FileState> {
+    const fileTable = this.db.getSchema().table('files');
+    const fileState = await this.getFile(payload.id);
+    const chunks: FileChunk[] = fileState.chunks || [];
+
+    // when file already have this chunk, no need to update file state
+    const hasChunk = chunks.findIndex((c) => c.index === payload.chunkIndex);
+    if (hasChunk > -1) {
+      return fileState;
+    }
+
+    // add new chunks
+    chunks.push({
+      index: payload.chunkIndex,
+      binary: payload.chunk
+    });
+    const results = await this.db
+      .update(fileTable)
+      .set(fileTable.chunks, chunks)
+      .where(fileTable.id.eq(payload.id))
+      .exec();
+    // commit file transferred action
+    await this.commitAction(ChatAction.FileChunkReceived, payload);
+    if (results.length > 0) {
+      return results[0] as FileState;
+    }
+    return null;
+  }
+
+  async deleteFile(payload: DeletedFilePayload): Promise<FileState> {
+    const fileTable = this.db.getSchema().table('files');
+    const results = await this.db
+      .delete()
+      .where(fileTable.id.eq(payload.id))
+      .exec();
+    if (results.length > 0) {
+      return results[0] as FileState;
     }
     return null;
   }
