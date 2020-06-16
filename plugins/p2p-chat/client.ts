@@ -6,7 +6,7 @@ import { v4 as uuid } from 'uuid';
 import { Consola } from 'consola';
 import { map } from 'rxjs/operators';
 import { Empty } from 'google-protobuf/google/protobuf/empty_pb';
-import { IConversationStateManager } from './conversation-state';
+import { IConversationStateManager, FileState } from './conversation-state';
 import { IMessenger, FileInfo, mapConversationFromState } from './messaging';
 import {
   IChatClient,
@@ -477,10 +477,11 @@ export class ChatClient implements IChatClient {
     // when message are file, create file first
     const isBinary =
       message.type === MessageType.FILE || message.type === MessageType.IMAGE;
+    let fileState: FileState;
     if (isBinary) {
       const file = message.content as FileContent;
-      const fileState = await this.conversationManager.newFile({
-        id: uuid(),
+      fileState = await this.conversationManager.newFile({
+        id: file.id || uuid(),
         name: file.name,
         size: file.size,
         type: file.type,
@@ -491,7 +492,7 @@ export class ChatClient implements IChatClient {
     // create new conversation state
     let content = message.content as string;
     if (isBinary) {
-      content = (message.content as FileContent)?.id;
+      content = fileState?.id;
     }
     const convState = await this.conversationManager.sendMessage({
       id: uuid(),
@@ -518,7 +519,7 @@ export class ChatClient implements IChatClient {
           const info = message.content as FileContent;
           messageContent = info.id;
           file = {
-            name: info.id,
+            name: info.name,
             size: info.size,
             type: info.type
           } as FileInfo;
@@ -598,6 +599,10 @@ export class ChatClient implements IChatClient {
         if (id === this.profile.id) {
           return;
         }
+        // only send type status when ready
+        if (!this.channels[id].sendChannelReady) {
+          return;
+        }
         return this.messenger.typing(this.channels[id], {
           roomID
         });
@@ -605,20 +610,18 @@ export class ChatClient implements IChatClient {
     );
   }
 
-  async requestFile(
-    ownerID: string,
-    fileID: string,
-    startIndex: number
-  ): Promise<void> {
-    if (!this.channels[ownerID]) {
+  async requestFile(id: string, startAt: number): Promise<void> {
+    // get file id
+    const fileState = await this.conversationManager.getFile(id);
+    if (!this.channels[fileState.owner]) {
       throw new Error('file owner not found');
     }
-    if (!this.channels[ownerID].receiveChannelReady) {
+    if (!this.channels[fileState.owner].receiveChannelReady) {
       throw new Error('file owner offline');
     }
-    await this.messenger.requestFile(this.channels[ownerID], {
-      id: fileID,
-      startAt: startIndex
+    await this.messenger.requestFile(this.channels[fileState.owner], {
+      id,
+      startAt
     });
   }
 

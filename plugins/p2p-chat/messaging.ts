@@ -1,4 +1,5 @@
 import { v4 as uuid } from 'uuid';
+import { delay } from 'bluebird';
 import { Consola } from 'consola';
 import { schema, Type, Database, Order } from 'lovefield';
 import {
@@ -25,6 +26,7 @@ export enum MessagingType {
   FileChunk = 'file:chunk'
 }
 
+// export const FILE_CHUNK_SIZE = 16384;
 export const FILE_CHUNK_SIZE = 16384;
 
 /**
@@ -97,7 +99,7 @@ export interface FileStartPayload {
 export interface FileChunkPayload {
   id: string;
   chunkIndex: number;
-  chunk: ArrayBuffer;
+  chunk: string;
 }
 
 type MessagingPayload =
@@ -343,14 +345,6 @@ export class Messenger implements IMessenger {
     payload: NewMessagePayload
   ): Promise<void> {
     this.logger.debug('receive message payload', payload);
-    const convState = await this.convMgr.receiveMessage({
-      id: payload.id,
-      roomID: payload.roomID,
-      senderID: channel.id,
-      content: payload.messageContent,
-      type: payload.messageType,
-      sentAt: new Date(payload.sendAt)
-    });
     if (
       payload.messageType === MessageType.FILE ||
       payload.messageType === MessageType.IMAGE
@@ -365,6 +359,14 @@ export class Messenger implements IMessenger {
         numberOfChunks: Math.ceil(payload.file?.size / FILE_CHUNK_SIZE)
       });
     }
+    const convState = await this.convMgr.receiveMessage({
+      id: payload.id,
+      roomID: payload.roomID,
+      senderID: channel.id,
+      content: payload.messageContent,
+      type: payload.messageType,
+      sentAt: new Date(payload.sendAt)
+    });
     const conv = mapConversationFromState(mapChannelToUser(channel), convState);
     this.logger.debug('publish on receive message', conv);
     channel._onReceiveMessage.next(conv);
@@ -455,7 +457,7 @@ export class Messenger implements IMessenger {
       numberOfChunk
     });
     // send each chunk of file
-    for (let i = 0; i < chunkSize; i++) {
+    for (let i = 0; i < numberOfChunk; i++) {
       const offset = (i + 1) * chunkSize;
       const chunk = fileState.binary.slice(
         i * chunkSize,
@@ -464,10 +466,12 @@ export class Messenger implements IMessenger {
       await this.sendFileChunk(channel, {
         id: fileState.id,
         chunkIndex: i,
-        chunk
+        chunk: ab2str(chunk)
       });
+      await delay(100);
     }
     // all file finish transferred
+    this.logger.debug('all file transferred', channel.id, payload);
     fileState = await this.convMgr.fileTransferred({
       id: payload.id,
       to: channel.id
@@ -513,16 +517,22 @@ export class Messenger implements IMessenger {
     channel: UserChannel,
     payload: FileChunkPayload
   ): Promise<void> {
-    let fileState = await this.convMgr.receiveFileChunk({
+    // get current state
+    let fileState = await this.convMgr.getFile(payload.id);
+    if (fileState.chunks?.length === fileState.numberOfChunks) {
+      // all chunk already downloaded
+      return null;
+    }
+    fileState = await this.convMgr.receiveFileChunk({
       id: payload.id,
       chunkIndex: payload.chunkIndex,
-      chunk: payload.chunk
+      chunk: str2ab(payload.chunk)
     });
     let file = mapFileContentFromState(fileState);
-    this.logger.debug('publish file receive chunk', file);
     channel._onReceiveFileChunk.next(file);
     // all chunk transfered
     if (file.downloaded >= 1) {
+      this.logger.debug('all file chunk received', file);
       fileState = await this.convMgr.allFileChunkReceived({
         id: payload.id
       });
@@ -554,8 +564,10 @@ export class Messenger implements IMessenger {
 }
 
 export function mapFileContentFromState(state: FileState): FileContent {
-  const downloaded =
-    (state?.chunks?.length || 0) / (state?.numberOfChunks || 1);
+  let downloaded = (state?.chunks?.length || 0) / (state?.numberOfChunks || 1);
+  if (!state?.numberOfChunks) {
+    downloaded = 1;
+  }
   return {
     id: state?.id,
     name: state?.name,
@@ -585,10 +597,10 @@ export function mapConversationFromState(
   if (!state.isReceiver) {
     if (state.errorCode || state.errorMessage) {
       status = ConversationStatus.FAILED;
-    } else if (state.receivedBy?.length > 0) {
-      status = ConversationStatus.RECEIVED;
     } else if (state.readBy?.length > 0) {
       status = ConversationStatus.READ;
+    } else if (state.receivedBy?.length > 0) {
+      status = ConversationStatus.RECEIVED;
     } else {
       status = ConversationStatus.SENT;
     }
@@ -626,4 +638,12 @@ export function mapConversationFromState(
     sender,
     status
   } as Conversation;
+}
+
+function ab2str(buf: ArrayBuffer): string {
+  return new TextDecoder().decode(buf);
+}
+
+function str2ab(str: string): ArrayBuffer {
+  return new TextEncoder().encode(str);
 }

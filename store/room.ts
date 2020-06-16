@@ -1,7 +1,12 @@
 import { MutationTree, ActionTree } from 'vuex/types/index';
 import { v4 as uuid } from 'uuid';
 import { RootState } from './index';
-import { ConversationStatus, MessageType } from '~/plugins/p2p-chat/p2p-chat';
+import {
+  ConversationStatus,
+  MessageType,
+  FileContent,
+  Conversation as RawConversation
+} from '~/plugins/p2p-chat/p2p-chat';
 
 export interface Room {
   id: string;
@@ -26,11 +31,28 @@ export interface User {
   online: boolean;
 }
 
+export enum ContentType {
+  TEXT,
+  IMAGE,
+  FILE
+}
+
+export interface FileInfo {
+  id: string;
+  name: string;
+  binary: Blob;
+  size: number;
+  type: string;
+  downloaded: number;
+}
+
 export interface Conversation {
   id: string;
   receive: boolean;
-  message: string;
   sentAt: Date;
+  sender?: string;
+  type: ContentType;
+  message: string | FileInfo;
   read?: boolean;
   received?: boolean;
   failed?: boolean;
@@ -38,7 +60,8 @@ export interface Conversation {
 
 export interface SentMessage {
   id: string;
-  message: string;
+  type: ContentType;
+  message: string | FileInfo;
   sentAt: Date;
 }
 
@@ -52,7 +75,19 @@ export interface Participant {
   roomID: string;
 }
 
+export interface FileTransferProgress {
+  id: string;
+  progress: number;
+}
+
+export interface FileTransferComplete {
+  id: string;
+  binary: Blob;
+}
+
 export interface RoomState {
+  loadingProfile: boolean;
+  profile: User;
   loadingRoom: boolean;
   error: Error;
   rooms: Room[];
@@ -63,6 +98,8 @@ export interface RoomState {
 
 export function state(): RoomState {
   return {
+    loadingProfile: false,
+    profile: null,
     loadingRoom: false,
     error: null,
     rooms: [],
@@ -73,6 +110,18 @@ export function state(): RoomState {
 }
 
 export const mutations: MutationTree<RoomState> = {
+  loadProfile(state) {
+    state.error = null;
+    state.loadingProfile = true;
+  },
+  profileLoaded(state, profile: User) {
+    state.loadingProfile = false;
+    state.profile = profile;
+  },
+  errorLoadProfile(state, error: Error) {
+    state.error = error;
+    state.loadingProfile = false;
+  },
   loadRooms(state) {
     state.error = null;
     state.loadingRoom = true;
@@ -114,12 +163,25 @@ export const mutations: MutationTree<RoomState> = {
     state.loadingConversation = false;
   },
   sendingMessage(state, message: SentMessage) {
-    state.conversations.push({
+    const conv = {
       id: message.id,
-      message: message.message,
       receive: false,
-      sentAt: message.sentAt
-    });
+      sentAt: message.sentAt,
+      message: message.message,
+      type: message.type
+    } as Conversation;
+    state.conversations.push(conv);
+    const idx = state.rooms.findIndex((r) => r.id === state.activeRoom.id);
+    if (idx > -1) {
+      if (
+        message.type === ContentType.FILE ||
+        message.type === ContentType.IMAGE
+      ) {
+        state.rooms[idx].lastConversation = (message.message as FileInfo)?.name;
+      } else {
+        state.rooms[idx].lastConversation = message.message as string;
+      }
+    }
   },
   sendingMessageFailed(state, tempID: string) {
     // replace optimist conv. with error one
@@ -163,6 +225,35 @@ export const mutations: MutationTree<RoomState> = {
   },
   receiveMessage(state, conv: Conversation) {
     state.conversations.push(conv);
+    const idx = state.rooms.findIndex((r) => r.id === state.activeRoom.id);
+    if (idx > -1) {
+      if (conv.type === ContentType.FILE || conv.type === ContentType.IMAGE) {
+        state.rooms[idx].lastConversation = (conv.message as FileInfo)?.name;
+      } else {
+        state.rooms[idx].lastConversation = conv.message as string;
+      }
+    }
+  },
+  receiveFileChunk(state, progress: FileTransferProgress) {
+    const idx = state.conversations.findIndex(
+      (conv) => (conv.message as FileInfo)?.id === progress.id
+    );
+    if (idx > -1) {
+      if ((state.conversations[idx].message as FileInfo)?.downloaded === 1) {
+        return;
+      }
+      (state.conversations[idx].message as FileInfo).downloaded =
+        progress.progress;
+    }
+  },
+  fileTransferComplete(state, file: FileTransferComplete) {
+    const idx = state.conversations.findIndex(
+      (conv) => (conv.message as FileInfo)?.id === file.id
+    );
+    if (idx > -1) {
+      (state.conversations[idx].message as FileInfo).binary = file.binary;
+      (state.conversations[idx].message as FileInfo).downloaded = 1;
+    }
   },
   userTyping(state, participant: Participant) {
     const idx = state.rooms.findIndex((room) => room.id === participant.roomID);
@@ -210,6 +301,15 @@ export const mutations: MutationTree<RoomState> = {
 };
 
 export const actions: ActionTree<RoomState, RootState> = {
+  async loadProfile({ commit }) {
+    commit('loadProfile');
+    try {
+      const profile = await this.$p2pchat.myProfile();
+      commit('profileLoaded', profile);
+    } catch (err) {
+      commit('errorLoadProfile', err);
+    }
+  },
   async loadRooms({ commit }) {
     commit('loadRooms');
     try {
@@ -217,12 +317,24 @@ export const actions: ActionTree<RoomState, RootState> = {
       const rooms: Room[] = [];
       for (const r of myRooms) {
         const convos = await this.$p2pchat.getConversations(r.id, 0, 1);
+        let lastConversation = '';
+        const conv = convos[0];
+        if (conv) {
+          if (
+            conv.message?.type === MessageType.FILE ||
+            conv.message?.type === MessageType.IMAGE
+          ) {
+            lastConversation = (conv.message?.content as FileContent)?.name;
+          } else {
+            lastConversation = conv.message?.content as string;
+          }
+        }
         rooms.push({
           id: r.id,
           name: r.name,
           description: r.description,
           photo: r.photo,
-          lastConversation: (convos[0]?.message.content as string) || '',
+          lastConversation,
           typings: []
         });
       }
@@ -238,20 +350,7 @@ export const actions: ActionTree<RoomState, RootState> = {
       const convos = await this.$p2pchat.getConversations(roomID, 0, 20);
       commit(
         'conversationLoaded',
-        convos
-          .map(
-            (c) =>
-              ({
-                id: c.id,
-                message: c.message.content as string,
-                receive: c.isReceiver,
-                sentAt: c.sendAt,
-                failed: c.status === ConversationStatus.FAILED,
-                read: c.status === ConversationStatus.READ,
-                received: c.status === ConversationStatus.RECEIVED
-              } as Conversation)
-          )
-          .reverse()
+        convos.map((c) => mapConversation(c)).reverse()
       );
     } catch (err) {
       commit('errorLoadConversation', err);
@@ -267,20 +366,7 @@ export const actions: ActionTree<RoomState, RootState> = {
       );
       commit(
         'nextConversationLoaded',
-        convos
-          .map(
-            (c) =>
-              ({
-                id: c.id,
-                message: c.message.content as string,
-                receive: c.isReceiver,
-                sentAt: c.sendAt,
-                failed: c.status === ConversationStatus.FAILED,
-                read: c.status === ConversationStatus.READ,
-                received: c.status === ConversationStatus.RECEIVED
-              } as Conversation)
-          )
-          .reverse()
+        convos.map((c) => mapConversation(c)).reverse()
       );
     } catch (err) {
       commit('errorLoadConversation', err);
@@ -303,15 +389,54 @@ export const actions: ActionTree<RoomState, RootState> = {
       });
       commit('messageSent', {
         tempId,
-        conversation: {
-          id: c.id,
-          message: c.message.content as string,
-          receive: c.isReceiver,
-          sentAt: c.sendAt,
-          failed: c.status === ConversationStatus.FAILED,
-          read: c.status === ConversationStatus.READ,
-          received: c.status === ConversationStatus.RECEIVED
-        }
+        conversation: mapConversation(c)
+      } as SentConversation);
+    } catch (err) {
+      commit('sendingMessageFailed', tempId);
+    }
+  },
+  async sendFile({ commit, state }, file: File) {
+    const tempId = uuid();
+    // load file
+    const binary = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = function() {
+        resolve(this.result as ArrayBuffer);
+      };
+      fr.onerror = function(err) {
+        reject(err);
+      };
+      fr.readAsArrayBuffer(file);
+    });
+    const message = {
+      id: uuid(),
+      name: file.name,
+      size: file.size,
+      downloaded: 1,
+      type: file.type,
+      binary: new Blob([binary])
+    } as FileInfo;
+    commit('sendingMessage', {
+      id: tempId,
+      type: isImage(message.type) ? ContentType.IMAGE : ContentType.FILE,
+      message,
+      sentAt: new Date()
+    } as SentMessage);
+    try {
+      const c = await this.$p2pchat.sendMessage(state.activeRoom?.id, {
+        type: isImage(message.type) ? MessageType.IMAGE : MessageType.FILE,
+        content: {
+          id: message.id,
+          name: message.name,
+          size: message.size,
+          downloaded: message.downloaded,
+          type: message.type,
+          binary
+        } as FileContent
+      });
+      commit('messageSent', {
+        tempId,
+        conversation: mapConversation(c)
       } as SentConversation);
     } catch (err) {
       commit('sendingMessageFailed', tempId);
@@ -326,6 +451,9 @@ export const actions: ActionTree<RoomState, RootState> = {
       await this.$p2pchat.readMessage(state.activeRoom?.id, conversationID);
       commit('readMessage', conversationID);
     }
+  },
+  requestFile(_, fileID: string) {
+    return this.$p2pchat.requestFile(fileID, 0);
   },
   subscribeConversationActivity({ commit, dispatch, state }) {
     this.$p2pchat.onMessageRead.subscribe((conv) => {
@@ -350,16 +478,26 @@ export const actions: ActionTree<RoomState, RootState> = {
     });
     this.$p2pchat.onReceiveMessage.subscribe((c) => {
       if (c.roomID === state.activeRoom?.id) {
-        commit('receiveMessage', {
-          id: c.id,
-          message: c.message.content as string,
-          receive: c.isReceiver,
-          sentAt: c.sendAt,
-          failed: c.status === ConversationStatus.FAILED,
-          read: c.status === ConversationStatus.READ,
-          received: c.status === ConversationStatus.RECEIVED
-        });
+        commit('receiveMessage', mapConversation(c));
+        if (
+          c.message.type === MessageType.FILE ||
+          c.message.type === MessageType.IMAGE
+        ) {
+          dispatch('requestFile', (c.message.content as FileContent)?.id);
+        }
       }
+    });
+    this.$p2pchat.onReceiveFileChunk.subscribe((f) => {
+      commit('receiveFileChunk', {
+        id: f.id,
+        progress: f.downloaded
+      } as FileTransferProgress);
+    });
+    this.$p2pchat.onFileTransferEnd.subscribe((f) => {
+      commit('fileTransferComplete', {
+        id: f.id,
+        binary: new Blob([f.binary])
+      } as FileTransferComplete);
     });
     this.$p2pchat.onRoomDestroyed.subscribe((r) => {
       commit('leftRoom', r.id);
@@ -395,3 +533,46 @@ export const actions: ActionTree<RoomState, RootState> = {
     });
   }
 };
+
+export function mapConversation(c: RawConversation): Conversation {
+  let message: string | FileInfo;
+  if (
+    c.message?.type === MessageType.FILE ||
+    c.message?.type === MessageType.IMAGE
+  ) {
+    const content = c.message?.content as FileContent;
+    message = {
+      id: content.id,
+      name: content.name,
+      size: content.size,
+      type: content.type,
+      downloaded: content.downloaded,
+      binary: content.binary
+        ? new Blob([content.binary], { type: content.type })
+        : null
+    } as FileInfo;
+  } else {
+    message = c.message?.content as string;
+  }
+  return {
+    id: c.id,
+    sender: c.sender?.name,
+    type: mapMessageType[c.message.type],
+    message,
+    receive: c.isReceiver,
+    sentAt: c.sendAt,
+    failed: c.status === ConversationStatus.FAILED,
+    read: c.status === ConversationStatus.READ,
+    received: c.status === ConversationStatus.RECEIVED
+  } as Conversation;
+}
+
+export const mapMessageType = {
+  [MessageType.MESSAGE]: ContentType.TEXT,
+  [MessageType.FILE]: ContentType.FILE,
+  [MessageType.IMAGE]: ContentType.IMAGE
+};
+
+export function isImage(fileType: string): boolean {
+  return /image/.test(fileType);
+}

@@ -218,8 +218,10 @@ export class ConversationManager implements IConversationStateManager {
       .addColumn('isOwner', Type.BOOLEAN)
       .addColumn('owner', Type.STRING)
       .addColumn('transferredTo', Type.OBJECT)
+      .addColumn('chunks', Type.OBJECT)
+      .addColumn('numberOfChunks', Type.OBJECT)
       .addPrimaryKey(['id'])
-      .addNullable(['transferredTo', 'owner']);
+      .addNullable(['transferredTo', 'owner', 'chunks', 'numberOfChunks']);
 
     builder
       .createTable('conversations')
@@ -312,8 +314,8 @@ export class ConversationManager implements IConversationStateManager {
       .limit(limit)
       .exec();
     return results.map((r: any) => {
-      const conv = r.conversations;
-      conv.messageBinary = r.files;
+      const conv = { ...r.conversations };
+      conv.messageBinary = { ...r.files };
       return conv;
     });
   }
@@ -328,11 +330,11 @@ export class ConversationManager implements IConversationStateManager {
       .where(convTable.id.eq(id))
       .limit(1)
       .exec();
-    if (results.length > 0) {
+    if (results?.length > 0) {
       const r: any = results[0];
-      const conv = r.conversations;
-      conv.messageBinary = r.files;
-      return conv as ConversationState;
+      const conv = { ...r.conversations };
+      conv.messageBinary = { ...r.files };
+      return conv;
     }
     return null;
   }
@@ -361,33 +363,27 @@ export class ConversationManager implements IConversationStateManager {
         convState.messageText = payload.content;
     }
     const row = convTable.createRow(convState);
-    const results = await this.db
-      .insertOrReplace()
+    await this.db
+      .insert()
       .into(convTable)
       .values([row])
       .exec();
     // commit send message action
     await this.commitAction(ChatAction.SendMessage, payload);
-    if (results.length > 0) {
-      return results[0] as ConversationState;
-    }
-    return null;
+    return this.getConversation(payload.id);
   }
 
   async failedToSend(
     payload: MessageFailedToSendPayload
   ): Promise<ConversationState> {
     const convTable = this.db.getSchema().table('conversations');
-    const results = await this.db
+    await this.db
       .update(convTable)
       .set(convTable.errorCode, payload.errorCode)
       .set(convTable.errorMessage, payload.errorMessage)
       .where(convTable.id.eq(payload.id))
       .exec();
-    if (results.length > 0) {
-      return results[0] as ConversationState;
-    }
-    return null;
+    return this.getConversation(payload.id);
   }
 
   async receiveMessage(
@@ -413,17 +409,14 @@ export class ConversationManager implements IConversationStateManager {
         convState.messageText = payload.content;
     }
     const row = convTable.createRow(convState);
-    const results = await this.db
+    await this.db
       .insertOrReplace()
       .into(convTable)
       .values([row])
       .exec();
     // commit receive message action
     await this.commitAction(ChatAction.ReceiveMessage, payload);
-    if (results.length > 0) {
-      return results[0] as ConversationState;
-    }
-    return null;
+    return this.getConversation(payload.id);
   }
 
   async readMessage(payload: ReadMessagePayload): Promise<ConversationState> {
@@ -435,7 +428,7 @@ export class ConversationManager implements IConversationStateManager {
       .exec();
     // commit read message action
     await this.commitAction(ChatAction.ReadMessage, payload);
-    if (results.length > 0) {
+    if (results?.length > 0) {
       return results[0] as ConversationState;
     }
     return this.getConversation(payload.id);
@@ -477,10 +470,11 @@ export class ConversationManager implements IConversationStateManager {
     const fileTable = this.db.getSchema().table('files');
     const results = await this.db
       .select()
+      .from(fileTable)
       .where(fileTable.id.eq(id))
       .limit(1)
       .exec();
-    if (results.length > 0) {
+    if (results?.length > 0) {
       return results[0] as FileState;
     }
     return null;
@@ -506,7 +500,7 @@ export class ConversationManager implements IConversationStateManager {
       .exec();
     // commit new file action
     await this.commitAction(ChatAction.NewFile, payload);
-    if (results.length > 0) {
+    if (results?.length > 0) {
       return results[0] as FileState;
     }
     return null;
@@ -533,7 +527,8 @@ export class ConversationManager implements IConversationStateManager {
     const fileTable = this.db.getSchema().table('files');
     const fileState = await this.getFile(payload.id);
     const chunks = fileState.chunks.sort((a, b) => a.index - b.index);
-    const blob = new Blob(chunks.map((c) => c.binary));
+    const buffers = chunks.map((c) => c.binary);
+    const blob = new Blob(buffers);
     fileState.binary = await blob.arrayBuffer();
     fileState.chunks = [];
     fileState.numberOfChunks = 0;
@@ -541,7 +536,7 @@ export class ConversationManager implements IConversationStateManager {
       .update(fileTable)
       .set(fileTable.binary, fileState.binary)
       .set(fileTable.chunks, [])
-      .set(fileTable.numberofChunks, 0)
+      .set(fileTable.numberOfChunks, 0)
       .where(fileTable.id.eq(payload.id))
       .exec();
     // commit file transferred action
@@ -571,7 +566,7 @@ export class ConversationManager implements IConversationStateManager {
       .exec();
     // commit new file action
     await this.commitAction(ChatAction.FileReceived, payload);
-    if (results.length > 0) {
+    if (results?.length > 0) {
       return results[0] as FileState;
     }
     return null;
@@ -610,7 +605,7 @@ export class ConversationManager implements IConversationStateManager {
       .delete()
       .where(fileTable.id.eq(payload.id))
       .exec();
-    if (results.length > 0) {
+    if (results?.length > 0) {
       return results[0] as FileState;
     }
     return null;

@@ -1,4 +1,5 @@
 import { Observable } from 'rxjs';
+import { FileInfo } from './messaging';
 
 export interface User {
   id: string;
@@ -73,11 +74,7 @@ export interface IChatClient {
   ): Promise<Conversation[]>;
   sendMessage(roomID: string, message: Message): Promise<Conversation>;
   readMessage(roomID: string, messageID: string): Promise<Conversation>;
-  requestFile(
-    ownerID: string,
-    fileID: string,
-    startIndex: number
-  ): Promise<void>;
+  requestFile(id: string, startAt: number): Promise<void>;
   typing(roomID: string): Promise<void>;
   onUserConnected: Observable<string>; // user id
   onUserDisconnected: Observable<string>; // user id
