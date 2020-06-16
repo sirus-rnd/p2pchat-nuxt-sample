@@ -293,7 +293,6 @@ export class Messenger implements IMessenger {
 
   handleIncomingMessage(channel: UserChannel, event: MessageEvent): void {
     const msg: MessagingProtocol = JSON.parse(event.data);
-    this.logger.debug('receive incoming message', msg);
     switch (msg?.type) {
       case MessagingType.MessageNew: {
         this.onReceiveMessage(channel, msg.payload as NewMessagePayload);
@@ -468,7 +467,8 @@ export class Messenger implements IMessenger {
         chunkIndex: i,
         chunk: ab2str(chunk)
       });
-      await delay(100);
+      // add 50ms delay to avoid data brutes
+      await delay(50);
     }
     // all file finish transferred
     this.logger.debug('all file transferred', channel.id, payload);
@@ -641,9 +641,21 @@ export function mapConversationFromState(
 }
 
 function ab2str(buf: ArrayBuffer): string {
-  return new TextDecoder().decode(buf);
+  let binary = '';
+  const bytes = new Uint8Array(buf);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary);
 }
 
 function str2ab(str: string): ArrayBuffer {
-  return new TextEncoder().encode(str);
+  const binaryString = window.atob(str);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
 }

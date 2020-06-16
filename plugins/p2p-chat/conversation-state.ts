@@ -526,6 +526,10 @@ export class ConversationManager implements IConversationStateManager {
   ): Promise<FileState> {
     const fileTable = this.db.getSchema().table('files');
     const fileState = await this.getFile(payload.id);
+    // binary already received
+    if (fileState.binary) {
+      return fileState;
+    }
     const chunks = fileState.chunks.sort((a, b) => a.index - b.index);
     const buffers = chunks.map((c) => c.binary);
     const blob = new Blob(buffers);

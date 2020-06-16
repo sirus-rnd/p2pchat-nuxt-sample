@@ -99,7 +99,9 @@ export default class RoomsPage extends Vue {
     }
     try {
       return window.URL.createObjectURL(blob);
-    } catch (err) {}
+    } catch (err) {
+      console.log(err);
+    }
   }
 
   blobToUrl(blob: Blob): string {
