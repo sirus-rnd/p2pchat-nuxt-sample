@@ -1,11 +1,8 @@
-import { company, random, internet, lorem, date } from 'faker';
 import { Component, Vue, Watch } from 'vue-property-decorator';
-import { Mutation, State, Action } from 'vuex-class';
+import { State, Action } from 'vuex-class';
 import { AgoFilter } from '~/filters/ago';
 import { RootState } from '~/store';
 import { Room, Conversation, ContentType, User } from '~/store/room';
-import { MessagingType } from '~/plugins/p2p-chat/messaging';
-import { MessageType } from '~/plugins/p2p-chat/p2p-chat';
 
 @Component({
   middleware: ['authenticated'],
@@ -100,7 +97,7 @@ export default class RoomsPage extends Vue {
     try {
       return window.URL.createObjectURL(blob);
     } catch (err) {
-      console.log(err);
+      return '';
     }
   }
 

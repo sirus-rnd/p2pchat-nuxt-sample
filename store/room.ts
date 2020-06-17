@@ -1,12 +1,12 @@
 import { MutationTree, ActionTree } from 'vuex/types/index';
 import { v4 as uuid } from 'uuid';
-import { RootState } from './index';
 import {
   ConversationStatus,
   MessageType,
   FileContent,
   Conversation as RawConversation
-} from '~/plugins/p2p-chat/p2p-chat';
+} from '@sirusdev/p2pchat-browser-sdk';
+import { RootState } from './index';
 
 export interface Room {
   id: string;

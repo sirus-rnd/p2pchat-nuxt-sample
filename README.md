@@ -1,22 +1,17 @@
-# nuxt-peer
+# P2PChat Nuxt Framework Sample Project
 
-> peer client sample app on nuxt frameworl
+this project contain sample usage of p2pchat SDK on nuxt frameworks
 
-## Build Setup
+- sample conversation & room manageament using vuex state engine at `store/room.ts`
+- sample whatsapp like front-end on `pages/room.vue`
+- sample plugin wrapping using nuxt modules on `modules/p2p-chat` & its configuration on `nuxt.config.ts`
+
+## Quick Start
 
 ```bash
 # install dependencies
 $ npm install
 
-# serve with hot reload at localhost:3000
+# serve with hot reload at http://localhost:9012
 $ npm run dev
-
-# build for production and launch server
-$ npm run build
-$ npm run start
-
-# generate static project
-$ npm run generate
 ```
-
-For detailed explanation on how things work, check out [Nuxt.js docs](https://nuxtjs.org).

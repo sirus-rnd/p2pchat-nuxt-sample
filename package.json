@@ -1,8 +1,8 @@
 {
-  "name": "nuxt-peer",
+  "name": "p2pchat-nuxt-sample",
   "version": "1.0.0",
-  "description": "peer client sample app on nuxt frameworl",
-  "author": "Muhammad Hasan",
+  "description": "sample usage of p2pchat SDK on nuxt frameworks",
+  "author": "Muhammad Hasan <hasan@sirus.dev>",
   "private": true,
   "scripts": {
     "dev": "nuxt-ts",
@@ -11,23 +11,16 @@
     "start": "nuxt-ts start",
     "lint": "eslint --ext .ts,.js,.vue .",
     "fix-lint": "eslint --fix .",
-    "test": "jest",
-    "proto": "protoc -I=./protos signalling.proto --js_out=import_style=commonjs:./protos   --grpc-web_out=import_style=typescript,mode=grpcwebtext:./protos",
-    "proto-win": "protoc --plugin=\"protoc-gen-ts=D:\\document\\sirus\\p2p-comm\\nuxt-peer\\node_modules\\.bin\\protoc-gen-ts.cmd\" --js_out=\"import_style=commonjs,binary:./protos\" --ts_out=\"service=grpc-web:./protos\" -I=./protos signalling.proto"
+    "test": "jest"
   },
   "dependencies": {
-    "@improbable-eng/grpc-web": "^0.12.0",
     "@nuxt/typescript-runtime": "^0.4.0",
     "@nuxtjs/pwa": "^3.0.0-0",
+    "@sirusdev/p2pchat-browser-sdk": "0.0.5",
     "bluebird": "^3.7.2",
-    "consola": "^2.12.2",
-    "google-protobuf": "^3.12.2",
-    "grpc-web": "^1.1.0",
-    "localforage": "^1.7.4",
-    "lovefield": "^2.1.12",
+    "dotenv-defaults": "^1.1.1",
     "luxon": "^1.24.1",
     "nuxt": "^2.0.0",
-    "rxjs": "^6.5.5",
     "uuid": "^8.1.0"
   },
   "devDependencies": {
@@ -37,9 +30,7 @@
     "@nuxtjs/vuetify": "^1.0.0",
     "@types/bluebird": "^3.5.32",
     "@types/faker": "^4.1.12",
-    "@types/google-protobuf": "^3.7.2",
     "@types/jest": "^25.2.3",
-    "@types/lovefield": "^2.1.3",
     "@types/luxon": "^1.24.0",
     "@types/uuid": "^8.0.0",
     "@vue/test-utils": "^1.0.0-beta.27",
@@ -53,7 +44,6 @@
     "jest": "^24.1.0",
     "prettier": "^1.19.1",
     "ts-jest": "^25.0.0",
-    "ts-protoc-gen": "^0.12.0",
     "vue-jest": "^4.0.0-0",
     "vue-property-decorator": "^8.4.2",
     "vuex-class": "^0.3.2"

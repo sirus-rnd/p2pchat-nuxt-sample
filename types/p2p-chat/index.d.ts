@@ -1,8 +1,4 @@
-import { IChatClient } from '~/plugins/p2p-chat/p2p-chat';
-
-interface P2PChatOptions {
-  signallingHost: string;
-}
+import { IChatClient, P2PChatOptions } from '@sirusdev/p2pchat-browser-sdk';
 
 declare module 'vue/types/vue' {
   interface Vue {

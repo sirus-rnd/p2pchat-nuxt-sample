@@ -19,7 +19,8 @@
       "@types/node",
       "@nuxt/types",
       "@nuxtjs/vuetify",
-      "@types/jest"
+      "@types/jest",
+      "@sirusdev/p2pchat-browser-sdk/lib/p2pchat"
     ]
   },
   "exclude": ["node_modules", "cache"]

@@ -1,4 +1,13 @@
-export default {
+import { Configuration } from '@nuxt/types';
+import { P2PLogLevel } from '@sirusdev/p2pchat-browser-sdk';
+import dotenv from 'dotenv-defaults';
+
+// configure dotenv
+dotenv.config({
+  defaults: '.env.defaults'
+});
+
+const config: Configuration = {
   mode: 'spa',
   server: {
     port: 8054,
@@ -38,7 +47,7 @@ export default {
   /*
    ** Plugins to load before mounting the App
    */
-  plugins: ['~/plugins/p2p-chat'],
+  plugins: [],
   /*
    ** Nuxt.js modules
    */
@@ -50,7 +59,8 @@ export default {
     // Doc: https://github.com/nuxt-community/eslint-module
     '@nuxtjs/eslint-module',
     '@nuxtjs/vuetify',
-    '@nuxt/typescript-build'
+    '@nuxt/typescript-build',
+    '~/modules/p2p-chat'
   ],
   /*
    ** vuetify module configuration
@@ -74,6 +84,13 @@ export default {
       eslint: true
     }
   },
+  /**
+   * P2P Chat configurations
+   */
+  p2pchat: {
+    signalingUrl: process.env.P2PCHAT_SIGNALING_URL || 'http://localhost:9012',
+    logLevel: (process.env.P2PCHAT_LOG_LEVEL as P2PLogLevel) || 'error'
+  },
   /*
    ** Build configuration
    */
@@ -92,3 +109,5 @@ export default {
     }
   }
 };
+
+export default config;
