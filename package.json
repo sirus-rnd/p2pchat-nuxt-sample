@@ -16,7 +16,7 @@
   "dependencies": {
     "@nuxt/typescript-runtime": "^0.4.0",
     "@nuxtjs/pwa": "^3.0.0-0",
-    "@sirusdev/p2pchat-browser-sdk": "0.0.5",
+    "@sirusdev/p2pchat-browser-sdk": "0.0.6",
     "bluebird": "^3.7.2",
     "dotenv-defaults": "^1.1.1",
     "luxon": "^1.24.1",
