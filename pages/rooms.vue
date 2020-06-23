@@ -195,9 +195,10 @@
       </v-list>
     </v-content>
 
-    <v-footer app fixed inset paddless>
+    <v-footer app fixed inset>
       <v-file-input
         v-model="messageFile"
+        class="flex-grow-0"
         :disabled="!couldSendMessage"
         hide-input
         :clearable="false"
@@ -205,11 +206,14 @@
       <v-text-field
         v-model="message"
         :disabled="!couldSendMessage"
+        full-width=""
         autofocus
         draggable
         append-outer-icon="mdi-send"
         label="write some message"
         name="message"
+        outlined
+        hide-details
         autocomplete="off"
         required
         @keyup="typing()"
