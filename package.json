@@ -20,7 +20,7 @@
     "bluebird": "^3.7.2",
     "dotenv-defaults": "^1.1.1",
     "luxon": "^1.24.1",
-    "nuxt": "^2.0.0",
+    "nuxt": "^3.4.3",
     "uuid": "^8.1.0"
   },
   "devDependencies": {
